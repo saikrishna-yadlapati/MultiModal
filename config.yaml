@@ -1,0 +1,29 @@
+# Central config. Thresholds here are PLACEHOLDERS — they get tuned on a train split in
+# Session 3/4 and must never be tuned on the test split. All randomness uses `seed`.
+
+seed: 42
+
+paths:
+  raw: data/raw
+  variants: data/variants
+  manifest: data/manifest/manifest.csv
+
+audio:
+  target_sample_rate: 16000   # resample everything to this
+  mono: true
+
+features:
+  frame_length_s: 0.025
+  hop_length_s: 0.010
+  f0_min_hz: 65
+  f0_max_hz: 400
+  n_mfcc: 13
+
+# Placeholder detection thresholds — TO BE TUNED on train split, verified on held-out.
+detection:
+  long_pause_s: 0.8          # pause longer than this (beyond baseline) flags
+  rate_deviation_ratio: 0.35 # local rate differs from reference by this fraction
+  monotone_f0_std_ratio: 0.5 # candidate F0 std < this * reference F0 std
+
+evaluation:
+  iou_match_threshold: 0.3   # predicted/true interval overlap to count as a hit

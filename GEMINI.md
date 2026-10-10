@@ -1,0 +1,5 @@
+# Project instructions for Google Antigravity
+
+Read `HACKATHON_CONTEXT.md` in full before project work. It is the source of truth for the Multimodal AI Hackathon 2026 Track C project, requirements, strategy, evaluation, risks, and status.
+
+Work in small, verifiable increments. Inspect existing files before editing. Do not fabricate data, metrics, licenses, testing results, or implementation status. Keep the technical explanation evidence-first: calculations and timestamps must come from code, and any LLM explanation must be grounded in structured measurements. Protect the data split against speaker/transcript leakage; track source permissions and transformations; report uncertainty honestly. After changes, summarize changed files, how to run the work, actual tests and their outputs, limitations, and the next checkpoint. Do not switch tracks or substantially change architecture without human approval. Update `HACKATHON_CONTEXT.md` whenever a material decision or verified milestone changes.

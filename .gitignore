@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets
+.env
+*.key
+
+# Data: do NOT commit raw/source audio (license + size). Commit manifest + derived annotations.
+data/raw/*
+!data/raw/.gitkeep
+data/variants/*
+!data/variants/.gitkeep
+*.wav
+*.mp3
+*.flac
+*.m4a
+# allow a tiny sample if explicitly force-added and license-cleared:
+# git add -f data/raw/sample_cleared.wav

@@ -1,0 +1,25 @@
+# Core dependencies. Audio-critical libs pinned exactly for reproducibility.
+# UNTESTED in this environment yet — verify on first install (Session 1); a lockfile
+# (pip freeze) will be committed once a clean install is confirmed on Windows/CPU.
+
+# Audio / signal processing
+librosa==0.10.2
+praat-parselmouth==0.4.3
+soundfile==0.12.1
+numpy>=1.24,<2.0          # <2.0 for librosa/numba compatibility
+scipy>=1.11
+pandas>=2.1
+
+# Dashboard & viz
+streamlit>=1.37
+plotly>=5.22
+
+# Config & utils
+pyyaml>=6.0
+
+# Tests
+pytest>=8.0
+
+# NOT included yet (added when chosen/needed):
+#   forced aligner (torchaudio / whisperx / aeneas / MFA) — Session 2
+#   LLM client (anthropic) — Session 4, only if used for phrasing evidence
