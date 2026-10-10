@@ -18,6 +18,8 @@ features:
   f0_min_hz: 65
   f0_max_hz: 400
   n_mfcc: 13
+  silence_rel_db: -35.0   # frames this many dB below peak RMS count as silence
+  min_pause_s: 0.15       # silences shorter than this are not reported as pauses
 
 # Placeholder detection thresholds — TO BE TUNED on train split, verified on held-out.
 detection:

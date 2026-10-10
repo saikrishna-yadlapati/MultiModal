@@ -1,18 +1,12 @@
-# Core dependencies. Audio-critical libs pinned exactly for reproducibility.
-# UNTESTED in this environment yet — verify on first install (Session 1); a lockfile
-# (pip freeze) will be committed once a clean install is confirmed on Windows/CPU.
+# Core dependencies. Verified installed on Windows / Python 3.13.2 / CPU in Session 1.
+# Exact working versions are frozen in `requirements-lock.txt` (pip freeze).
 
 # Audio / signal processing
-librosa==0.10.2
-praat-parselmouth==0.4.3
-soundfile==0.12.1
-numpy>=1.24,<2.0          # <2.0 for librosa/numba compatibility
+praat-parselmouth>=0.4.7   # Praat F0/pitch; self-contained wheel, py3.13 OK
+soundfile>=0.14            # WAV read/write
+numpy>=2.0                 # py3.13 has NO numpy 1.x wheel; must be >=2.0
 scipy>=1.11
-pandas>=2.1
-
-# Dashboard & viz
-streamlit>=1.37
-plotly>=5.22
+# pandas added in Session 2 (manifest).
 
 # Config & utils
 pyyaml>=6.0
@@ -20,6 +14,10 @@ pyyaml>=6.0
 # Tests
 pytest>=8.0
 
-# NOT included yet (added when chosen/needed):
-#   forced aligner (torchaudio / whisperx / aeneas / MFA) — Session 2
-#   LLM client (anthropic) — Session 4, only if used for phrasing evidence
+# DEFERRED (not needed yet; add when the feature arrives):
+#   librosa  — for MFCC/spectral features (Session 4). NOTE: librosa 0.10.2 pins
+#              numba, which conflicts with numpy>=2 on py3.13. When we add it, use
+#              numba>=0.61 (py3.13 + numpy2 support) and re-freeze the lockfile.
+#   streamlit, plotly — dashboard (Session 5).
+#   forced aligner (torchaudio / whisperx / aeneas / MFA) — Session 2.
+#   anthropic — LLM phrasing of evidence objects (Session 4, optional).

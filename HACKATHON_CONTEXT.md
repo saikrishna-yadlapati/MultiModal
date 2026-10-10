@@ -327,6 +327,20 @@ At the point this context was created (2026-10-09):
 - Still open: forced aligner (test in Session 2), product brand (avoid "SonicTrace"), live Devpost rules/deadline recheck.
 - Implementation status: no working pipeline yet; only `config.py` self-check verified. Everything else untested.
 
+### Update 2026-10-11 (Session 1 — one-sample vertical slice)
+- First working end-to-end pipeline on one sample (VERIFIED): synthesize baseline (Windows SAPI TTS,
+  known transcript) → extract pause/speech-rate/F0 features → inject a known 1.5 s pause → detect it
+  **blind** → score vs ground truth. Blind detection localized the injected pause at **IoU 0.984**,
+  start/end error **7 ms / 16 ms**. Self-check tests: 3 passed. See `docs/SESSION_LOG.md` for commands/numbers.
+- Environment finding: the original `requirements.txt` (`numpy<2.0` + `librosa==0.10.2`) is **unbuildable on
+  Python 3.13**. Switched to numpy 2 + scipy + soundfile + **parselmouth (Praat) for F0**; **librosa deferred**
+  to Session 4 (needs numba>=0.61). Verified set frozen in `requirements-lock.txt`.
+- Honest limitation surfaced: the absolute-threshold pause detector also flags natural inter-sentence
+  pauses as false positives — motivates baseline-relative detection after alignment (Session 2).
+- Implementation status: one-sample feature + blind-detection slice works; no dataset/manifest, no aligner,
+  no dashboard, no held-out metrics yet.
+
+
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 
 ## 14. OFFICIAL AND TECHNICAL LINKS
