@@ -72,3 +72,31 @@ Reversible: yes — I/O is isolated in `manifest.py`; swap to pandas if scale ev
 What: No brand yet. Package placeholder = `speechlab`.
 Why: "SonicTrace" conflicts with an existing public tool (context §5). Pick + check later.
 Reversible: yes (rename is cheap while internal).
+
+## 2026-10-11 — Evidence contract + mechanical no-fabrication guard (Session 4)
+What: Detectors never return a bare interval. Each returns an `EvidenceItem`
+(`src/speechlab/detection/evidence.py`): flaw_type, interval_s, feature, reference_value,
+candidate_value, rule, severity, uncertainty, word_range. Any human-readable sentence is
+produced by `phrase_evidence` (deterministic template — no LLM) and must pass
+`check_no_fabricated_numbers`, which rejects any number in the prose not present in the
+object (or in the code-authored `rule` string, where thresholds live).
+Why: This is the project's scientific claim — a number may only come from measurement code,
+never from prose or an LLM. The guard makes that enforceable, not a promise: an LLM phraser
+can later replace the template behind the same guard and still cannot smuggle in an invented
+timestamp, score, or percentage. VERIFIED: 0 fabricated numbers across 12 variants + baseline.
+Reversible: yes — phraser is one function behind the guard; the contract is the stable part.
+
+## 2026-10-11 — Detectors are speaker-normalized; thresholds NOT tuned yet (Session 4)
+What: All three detectors compare the candidate to the SAME speaker's baseline profile
+(`build_reference`: longest natural pause, fastest local rate, typical local F0 std), so they
+flag deviation from that speaker, not absolute values. Thresholds in `config.yaml` stay as
+documented placeholders — deliberately not tuned.
+Why: There is one speaker and all rows are `train`; tuning thresholds now would be tuning on
+the only data (leakage against our own honesty rule). Tuning + held-out verification waits for
+Session 6, when alignment-based scoring and a real split exist.
+Honest findings (Session 4, not cherry-picked): long_pause 4/4 with 0 baseline false positives;
+monotone detects the flaw but false-positives on natural low-variability windows (needs
+word-aligned same-material comparison); rate_deviation 0/4 (energy-peak syllable proxy fails on
+real speech, needs alignment-based rate). The monotone/rate fixes depend on the Session 2
+aligner and are scheduled for Session 6.
+Reversible: yes — thresholds are config; detectors are swappable modules.

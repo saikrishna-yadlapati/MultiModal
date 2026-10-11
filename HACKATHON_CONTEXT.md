@@ -373,6 +373,25 @@ At the point this context was created (2026-10-09):
 - Implementation status: dataset now has a controlled contrastive severity spectrum; still no
   detectors beyond the Session 1 absolute-pause rule, no dashboard, no held-out metrics.
 
+### Update 2026-10-11 (Session 4 — baseline detectors + structured evidence objects)
+- Three transparent, speaker-normalized BLIND detectors (`long_pause`, `rate_deviation`,
+  `monotone`) implemented; each emits a strict `EvidenceItem` (flaw, interval, feature,
+  reference vs candidate value, rule, uncertainty) instead of a bare interval. Tests: **19 passed**.
+- **Core scientific contract VERIFIED**: `check_no_fabricated_numbers` guard → **0 fabricated
+  numbers** across all 12 variants + baseline; every evidence object passed schema. A number can
+  only reach prose if measurement code put it in the object. This is the project's honest claim.
+- Honest blind results (NOT tuned, NOT cherry-picked), reference = this speaker's baseline
+  (longest pause 0.92 s, fastest rate 6.00 syll/s, typical F0 std 9.93 Hz):
+  - `long_pause` **4/4**, IoU 0.36→0.69 with severity, **0 false positives on clean baseline**.
+  - `monotone` **4/4** on the flaw BUT **4 false positives on the clean baseline** (fires on
+    natural low-variability windows). Needs word-aligned same-material comparison → Session 6.
+  - `rate_deviation` **0/4** — energy-peak syllable proxy failed on real SAPI speech. Needs
+    alignment-based local rate (words ÷ aligned duration) → Session 6.
+- Thresholds remain documented placeholders — deliberately NOT tuned (one speaker, all `train`;
+  tuning now = tuning on the only data). Tuning + held-out verification is Session 6.
+- Implementation status: measurement→evidence→phrasing pipeline exists and is guard-enforced;
+  long_pause is reliable, monotone/rate need alignment-based fixes; no dashboard yet.
+
 
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 

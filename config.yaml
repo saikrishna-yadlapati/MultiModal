@@ -38,10 +38,18 @@ variants:
     # flatten factor k = 1 - severity (k=0 at sev 1.0 => fully monotone; k=1 => unchanged)
 
 # Placeholder detection thresholds — TO BE TUNED on train split, verified on held-out.
+# All three detectors are SPEAKER-NORMALIZED: they compare the candidate to the same
+# speaker's baseline, so these are deviation knobs, not absolute cutoffs.
 detection:
-  long_pause_s: 0.8          # pause longer than this (beyond baseline) flags
-  rate_deviation_ratio: 0.35 # local rate differs from reference by this fraction
-  monotone_f0_std_ratio: 0.5 # candidate F0 std < this * reference F0 std
+  long_pause_s: 0.8            # (Session 1 slice only) absolute long-pause cutoff
+  long_pause_excess_s: 0.3     # Session 4: flag a pause this many seconds longer than
+                               # the baseline speaker's LONGEST natural pause
+  rate_window_s: 1.0           # sliding-window length for local syllable rate
+  rate_hop_s: 0.25             # how far that window steps each reading
+  rate_deviation_ratio: 0.35   # flag a window > this fraction above baseline's fastest rate
+  monotone_window_s: 1.0       # sliding-window length for local pitch variability
+  monotone_hop_s: 0.25         # how far that window steps each reading
+  monotone_f0_std_ratio: 0.5   # flag a window whose F0 std < this * baseline typical std
 
 evaluation:
   iou_match_threshold: 0.3   # predicted/true interval overlap to count as a hit

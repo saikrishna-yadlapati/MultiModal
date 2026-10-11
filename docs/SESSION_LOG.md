@@ -224,3 +224,80 @@ speaker-aware normalization + strict evidence objects; run them blind on this va
 **Suggested commit:** `feat: controlled contrastive variant generators with severity sweep`
 
 ---
+
+## Session 4 — 2026-10-11 — Baseline detectors + structured evidence objects
+**Goal:** Build the three transparent, speaker-normalized blind detectors (long_pause,
+rate_deviation, monotone) that emit a STRICT evidence object instead of a bare interval,
+plus a mechanical guard proving generated prose contains no number the object does not hold.
+
+**Files created:**
+- `src/speechlab/detection/evidence.py` — `EvidenceItem` dataclass (== `ARCHITECTURE.md`
+  contract), `validate_evidence` (schema), `check_no_fabricated_numbers` (the guard:
+  returns any number in a sentence not backed by the object), `phrase_evidence`
+  (deterministic, number-safe template phraser — no LLM). Has a `__main__` self-check.
+- `src/speechlab/features/local.py` — windowed features: `local_f0_std` (pitch
+  variability per sliding window) and `local_syllable_rate` (energy-peak syllable proxy,
+  no alignment needed). `__main__` self-check.
+- `src/speechlab/detection/detectors.py` — `build_reference` (measures the baseline once:
+  longest natural pause, fastest local rate, typical local F0 std — all speaker-specific)
+  + three blind detectors + `detect_all`. Each returns `EvidenceItem`s.
+- `scripts/run_detect.py` — builds the reference from the baseline, runs all detectors
+  BLIND over every manifest variant, prints each evidence object + its phrasing + the
+  guard result, then reveals ground truth for an honest detection-vs-severity table.
+- `tests/test_evidence.py` — 7 self-checks (evidence validates; guard catches an invented
+  number; schema rejects bad intervals/empty uncertainty; each detector fires on its
+  synthetic flaw; `detect_all` emits only valid, number-safe evidence).
+
+**Files changed:**
+- `config.yaml` — `detection` block documented as speaker-normalized deviation knobs;
+  added `long_pause_excess_s` (0.3), `rate_window_s`/`rate_hop_s`, `monotone_window_s`/
+  `monotone_hop_s`. Left `long_pause_s` (Session 1 slice still uses it).
+- `docs/DECISIONS.md` — evidence contract + no-fabrication guard decision.
+
+**Why:** Milestone 4 (25% temporal grounding + 20% feature extraction). This is where the
+project's scientific claim becomes real: numbers come from code, the LLM may only phrase a
+verified object, and a check enforces it.
+
+**How to test (Session 4 acceptance):**
+```
+.venv\Scripts\python -m pytest tests/test_evidence.py -q
+.venv\Scripts\python scripts/run_detect.py
+```
+
+**Actual result (VERIFIED this session):**
+- `pytest` → **19 passed** (full suite; 7 new).
+- **Evidence guard: 0 fabricated numbers** across all 12 variants + baseline; every emitted
+  evidence object passed the schema. This is the core acceptance — PASS.
+- Reference profile (measured on the real baseline): longest natural pause 0.92 s,
+  fastest local rate 6.00 syll/s, typical local F0 std 9.93 Hz.
+- Blind detection-vs-severity (right class AND overlaps ground truth):
+  - **long_pause 4/4** — IoU rises with severity 0.36 → 0.53 → 0.63 → 0.69. **0 false
+    positives on the clean baseline.**
+  - **monotone 4/4** detected the flattened segment, BUT the detector also fires **4 false
+    positives on the clean baseline** (natural phrase-end pitch dips, local F0 std 0.39–2.34
+    Hz, below 0.5× the 9.93 Hz median).
+  - **rate_deviation 0/4** — the energy-peak syllable proxy did NOT fire on any rushed
+    segment of real SAPI speech (did not clear the baseline's fastest natural window +35%).
+  - Overall: 8/12 right-class-and-overlapping.
+
+**Limitations (honest — not cherry-picked):**
+- **Monotone over-fires**: comparing each window to the clip-wide median flags natural
+  low-variability moments as "monotone". A real fix needs word-aligned baseline-vs-candidate
+  comparison (same material), i.e. the aligner from Session 2 — deferred to Session 6.
+- **Rate detector failed on real speech**: the energy-peak proxy is too noisy / the 2 s
+  segment is diluted by the 1 s window. Needs alignment-based local rate (words ÷ aligned
+  duration) — Session 6. Marked `ponytail:` in `features/local.py`.
+- Thresholds are still placeholders. They are NOT tuned here on purpose — there is one
+  speaker, all `train`; tuning now would be tuning on the only data. Tuning + held-out
+  verification is Session 6.
+- Absolute-time IoU understates localization because pause/rate transforms shift later
+  timestamps; alignment-based scoring comes in Session 6.
+
+**Next step:** Session 5 — Streamlit dashboard (upload/select, playback, synced timelines,
+highlighted intervals from these evidence objects, limitations notice). The detector fixes
+(monotone normalization, rate rebuild, threshold tuning) land in Session 6 with the aligner
+and the held-out split.
+
+**Suggested commit:** `feat: baseline detectors and structured evidence objects`
+
+---
