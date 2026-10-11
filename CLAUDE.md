@@ -2,6 +2,8 @@
 
 Before doing project work, read `HACKATHON_CONTEXT.md` in full. It is the master source of truth for the event, Track C requirements, differentiation strategy, technical guardrails, deliverables, and current status.
 
+Also read `docs/EXPLANATION_STYLE.md` and follow it in every explanation: the owner is building this to truly understand and defend it, not to vibecode. Teach as you build — plain English, define every term, explain design choices and code (does/takes/returns/flow + tunable knobs) as you go.
+
 Rules:
 - Inspect the repository and existing files before changing anything.
 - Work in small, testable steps. State the goal and acceptance test before implementation.

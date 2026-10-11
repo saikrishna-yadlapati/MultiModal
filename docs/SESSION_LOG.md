@@ -98,3 +98,60 @@ python scripts/run_slice.py data/raw/baseline_001.wav data/raw/baseline_001.txt
 **Suggested commit:** `feat: end-to-end single-sample feature extraction + blind pause detection`
 
 ---
+
+## Session 2 — 2026-10-11 — Dataset manifest + forced-alignment decision
+**Goal:** (A) Define a dataset manifest schema with stable IDs, CSV I/O, and a validator that
+blocks train/test leakage; seed it from the real Session 1 sample. (B) Pick and TEST one forced
+aligner on a single sample (or document a fallback).
+
+**Files created:**
+- `src/speechlab/dataset/manifest.py` — `ManifestRow` dataclass (schema == `DATASET_CARD.md`),
+  `make_pair_id`/`make_sample_id`, `write_manifest`/`read_manifest` (stdlib csv+json),
+  and `validate_manifest` (leakage + ground-truth + enum checks). Has a `__main__` self-check.
+- `src/speechlab/alignment/aligner.py` — `align_words()` via torchaudio **MMS_FA** (Wav2Vec2 CTC):
+  normalize text to the model vocab, resample to 16 kHz, return per-word `[start,end]` + score.
+- `scripts/build_manifest.py` — seeds `data/manifest/manifest.csv` with 2 truthful rows
+  (baseline + injected-pause variant); sample rate and GT interval derived from the real files.
+- `scripts/run_align.py` — aligns one sample, prints word times, sanity-checks them.
+- `tests/test_manifest.py` — 4 self-checks (valid round-trip, missing GT, speaker leakage, pair split).
+
+**Files changed:**
+- `requirements.txt` — manifest uses stdlib (no pandas); torch/torchaudio added with CPU-index note.
+- `requirements-lock.txt` — re-frozen (adds torch 2.14.1+cpu, torchaudio 2.11.0+cpu + deps).
+- `docs/DECISIONS.md` — aligner = torchaudio MMS_FA; manifest = stdlib CSV/JSON (both reversible).
+
+**Decisions:** Forced aligner = **torchaudio MMS_FA** (pip-only, py3.13 wheels, least fragile on
+Windows vs aeneas/WhisperX/MFA). Manifest = stdlib CSV/JSON (no pandas) — see `DECISIONS.md`.
+
+**How to test (Session 2 acceptance):**
+```
+.venv\Scripts\python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+.venv\Scripts\python -m pytest tests/test_manifest.py -q
+.venv\Scripts\python scripts/build_manifest.py
+.venv\Scripts\python scripts/run_align.py data/raw/baseline_001.wav data/raw/baseline_001.txt
+```
+
+**Actual result (VERIFIED this session):**
+- `pytest tests/test_manifest.py` → **4 passed**; full suite **7 passed**.
+- `build_manifest.py` → wrote **2 rows** to `data/manifest/manifest.csv`; validator clean;
+  sr=22050, GT pause interval [4.500 → 6.000].
+- `run_align.py` → downloaded the MMS_FA model (first run), aligned all **41 words**,
+  timestamps **monotonic and within the 17.43 s duration**, mean confidence high
+  (most words 0.90–1.00; lowest 0.16 on "everyone"). **RESULT: PASS**. Word gaps fall at
+  the real inter-sentence pauses (e.g. "communication" ends 6.10 s, next word 7.08 s).
+
+**Limitations (honest):**
+- Alignment is validated only for *sane* timestamps (monotonic, in-range), not against
+  hand-labeled truth — no gold word boundaries exist yet, so word-level alignment error is
+  unmeasured. Confidence scores come from the model, not an independent check.
+- First alignment run needs internet to fetch the model; offline runs fail (fallback documented
+  in `DECISIONS.md`, not implemented since the aligner works).
+- Manifest holds the single Session 1 synthetic pair; still one speaker, split all `train`.
+- torch adds ~124 MB; this is the project's first heavy dependency (owner-approved).
+
+**Next step:** Session 3 — seeded controlled variant generators (pause / local-rate / pitch-flatten)
+with a severity sweep, each writing GT intervals + params into the manifest.
+
+**Suggested commit:** `feat: dataset manifest schema and torchaudio forced-alignment integration`
+
+---

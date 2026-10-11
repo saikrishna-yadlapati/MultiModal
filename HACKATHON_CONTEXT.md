@@ -341,6 +341,23 @@ At the point this context was created (2026-10-09):
   no dashboard, no held-out metrics yet.
 
 
+### Update 2026-10-11 (Session 2 — manifest + forced alignment)
+- Dataset manifest implemented (VERIFIED): schema in `src/speechlab/dataset/manifest.py` (stdlib
+  CSV/JSON, no pandas), with a validator that blocks speaker/transcript **train-test leakage** and
+  split-inconsistent pairs. 4 manifest tests + 3 slice tests = **7 passed**. Real manifest seeded
+  with the Session 1 pair (`data/manifest/manifest.csv`, 2 rows; GT pause [4.500→6.000]).
+- Forced aligner CHOSEN + TESTED: **torchaudio MMS_FA** (Wav2Vec2 CTC). Picked over
+  aeneas/WhisperX/MFA for pip-only install, py3.13 wheels, and Windows robustness (owner approved
+  the heavy torch dependency). Aligned the 41-word baseline sample: all word timestamps monotonic
+  and within the 17.43 s duration, high confidence — **PASS**. Fallback documented (not built).
+- Dependency change: added `torch 2.14.1+cpu` + `torchaudio 2.11.0+cpu` (CPU index), re-froze
+  `requirements-lock.txt`. First alignment run needs internet to fetch the model (then cached).
+- Honest gap: alignment checked only for *plausibility*, not against gold word boundaries (none
+  exist yet) — so word-level alignment error is still unmeasured.
+- Implementation status: manifest + alignment work on one sample; no controlled variant set,
+  no detectors beyond the Session 1 absolute-pause rule, no dashboard, no held-out metrics yet.
+
+
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 
 ## 14. OFFICIAL AND TECHNICAL LINKS

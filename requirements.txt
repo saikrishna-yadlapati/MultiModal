@@ -6,7 +6,14 @@ praat-parselmouth>=0.4.7   # Praat F0/pitch; self-contained wheel, py3.13 OK
 soundfile>=0.14            # WAV read/write
 numpy>=2.0                 # py3.13 has NO numpy 1.x wheel; must be >=2.0
 scipy>=1.11
-# pandas added in Session 2 (manifest).
+# Manifest uses stdlib csv/json (no pandas) — see src/speechlab/dataset/manifest.py.
+
+# Forced alignment (Session 2 decision): torchaudio MMS_FA (Wav2Vec2 CTC).
+# CPU wheels only; install from the PyTorch CPU index, NOT PyPI:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+# Downloads one acoustic model on first use (needs internet once; then cached).
+torch>=2.14
+torchaudio>=2.11
 
 # Config & utils
 pyyaml>=6.0
@@ -19,5 +26,4 @@ pytest>=8.0
 #              numba, which conflicts with numpy>=2 on py3.13. When we add it, use
 #              numba>=0.61 (py3.13 + numpy2 support) and re-freeze the lockfile.
 #   streamlit, plotly — dashboard (Session 5).
-#   forced aligner (torchaudio / whisperx / aeneas / MFA) — Session 2.
 #   anthropic — LLM phrasing of evidence objects (Session 4, optional).
