@@ -415,6 +415,22 @@ At the point this context was created (2026-10-09):
   0/4); those detector fixes + held-out metrics remain Session 6.
 
 
+### Update 2026-10-11 (Session 6a — multi-speaker dataset + held-out split)
+- Original Session 6 assumed an evaluation set; Sessions 1–5 built the pipeline on ONE
+  speaker / ONE transcript (all `train`), so no honest held-out split existed. Owner approved
+  splitting Session 6 into **6a (expand data)** + **6b (fixes + metrics)**.
+- Dataset expanded + VERIFIED: 3 Windows SAPI voices (David/Hazel/Zira) × 4 transcripts,
+  generated as the two consistent blocks of the speaker×transcript grid so the split is
+  **speaker- AND transcript-disjoint**: train = David/Hazel × tx001/tx002 (52 rows),
+  test = Zira × tx003/tx004 (26 rows). Manifest = **78 rows**, validator clean. Split policy
+  in `src/speechlab/dataset/plan.py`; built by `scripts/make_dataset.py` (supersedes
+  `make_variants.py`). Tests: **28 passed** (23 prior + 5 new split tests).
+- Reproducible: two generator runs → byte-identical WAVs (sha256 match on all 78 files).
+- Bug fixed (exposed by multi-speaker data): the dashboard now normalizes each candidate
+  against its OWN pair baseline, not `baselines[0]` (was a cross-speaker comparison).
+- Honest gap: three machine voices ≠ natural human speakers; still computer-injected flaws;
+  no metrics yet. Detector fixes (monotone/rate) + real held-out numbers are Session 6b.
+
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 
 ## 14. OFFICIAL AND TECHNICAL LINKS

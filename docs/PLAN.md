@@ -60,11 +60,27 @@ result is recorded in `SESSION_LOG.md`. No fabricated results. Untested = marked
 - Acceptance: `streamlit run src/speechlab/app/main.py` loads, analyzes a sample, shows intervals.
 - Commit: `feat: interactive Streamlit dashboard`
 
-### Session 6 — Held-out evaluation
-- Speaker/transcript-disjoint split. Event precision/recall/F1 by flaw class, localization
-  error (IoU / start-end error), false-positive rate on clean speech, detection-vs-severity.
+### Session 6 — Held-out evaluation (split into 6a + 6b on 2026-10-11)
+The original single-session plan assumed a dataset to evaluate on. Sessions 1–5 built it on
+ONE speaker / ONE transcript (all `train`), so a real speaker/transcript-disjoint held-out
+split did not yet exist. Owner approved splitting Session 6:
+
+#### Session 6a — Expand dataset for a real held-out split ✅ done
+- 3 SAPI voices × 4 transcripts; generate only the consistent grid blocks so the split is
+  speaker- AND transcript-disjoint (train = David/Hazel × tx001/tx002; test = Zira × tx003/tx004).
+- Split policy in `src/speechlab/dataset/plan.py`; built by `scripts/make_dataset.py`
+  (supersedes `make_variants.py`). Validator must stay clean; WAVs reproducible (sha256).
+- Acceptance: `python scripts/make_dataset.py` writes a validator-clean manifest with both
+  splits; split test asserts disjointness on both axes; two runs → byte-identical WAVs.
+- Commit: `feat: multi-speaker/transcript dataset with held-out split`
+
+#### Session 6b — Fixes + metrics (next)
+- Fix monotone (word-aligned same-material comparison) and rate_deviation (alignment-based
+  local rate) using the Session 2 aligner. Tune thresholds on the TRAIN split only.
+- Event precision/recall/F1 by flaw class, localization error (IoU / start-end error),
+  false-positive rate on clean speech, detection-vs-severity — all on the held-out TEST set.
 - Include failure cases. Real numbers only.
-- Acceptance: `python scripts/run_eval.py` prints metrics from a held-out set; results in `EVALUATION.md`.
+- Acceptance: `python scripts/run_eval.py` prints metrics from the held-out set; results in `EVALUATION.md`.
 - Commit: `feat: held-out evaluation harness with real metrics`
 
 ### Session 7 — Submission polish

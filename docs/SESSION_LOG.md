@@ -351,3 +351,67 @@ Session 2 aligner), threshold tuning, and a real held-out split with reported me
 **Suggested commit:** `feat: interactive Streamlit dashboard`
 
 ---
+
+## Session 6a — 2026-10-11 — Multi-speaker/transcript dataset + held-out split
+**Goal:** Sessions 1–5 ran on ONE speaker / ONE transcript (all `train`), so a genuine
+held-out split did not exist and Session 6's metrics could not be honest (tuning + testing
+on the only data = leakage). Expand the dataset to multiple speakers and transcripts and
+assign a speaker- AND transcript-disjoint train/test split, so Session 6b can tune on train
+and report on an unseen speaker + unseen words. (Owner chose this over a single-speaker
+"dev-set" eval.)
+
+**Files created:**
+- `src/speechlab/dataset/plan.py` — PURE dataset definition (no audio/SAPI/model): the 3
+  SAPI voices, 4 transcripts, and the disjoint split policy, plus `planned_pairs()`. One
+  importable source of truth shared by the generator and the split test.
+- `scripts/make_dataset.py` — synthesizes a baseline per (speaker, transcript) with the
+  explicit SAPI voice, runs the Session 3 severity sweep for each, writes one manifest with
+  the split, validates it, and prints sha256s. Supersedes `scripts/make_variants.py`.
+- `tests/test_dataset_split.py` — 5 pure tests: plan disjoint on both axes; both splits
+  present with known voices/transcripts; every pair's split agrees with both sets; a
+  plan-shaped manifest passes the leakage validator; forcing a test speaker into train is
+  caught as LEAKAGE.
+
+**Files changed:**
+- `src/speechlab/app/main.py` — **bug fix exposed by multi-speaker data**: the dashboard now
+  picks the candidate's OWN pair baseline (same speaker+transcript) as the reference instead
+  of `baselines[0]`. With one speaker that was always correct; with many it was comparing a
+  Zira clip against David's baseline (cross-speaker) and defeating speaker normalization.
+  Updated the stale "run make_variants.py" hint to make_dataset.py.
+
+**Why:** Milestone 6 prerequisite + more 30%-rubric data engineering. A disjoint split is the
+only honest basis for the Session 6b metrics.
+
+**How to test (Session 6a acceptance):**
+```
+.venv\Scripts\python -m pytest tests/test_dataset_split.py -q
+.venv\Scripts\python scripts/make_dataset.py
+```
+
+**Actual result (VERIFIED this session):**
+- `pytest tests/test_dataset_split.py` → **5 passed**; full suite **28 passed** (23 prior + 5).
+- `make_dataset.py` → wrote **78 rows** (6 baselines + 72 variants) to
+  `data/manifest/manifest.csv`; validator **clean**; split = **52 train / 26 test**,
+  speaker- and transcript-disjoint (train = David/Hazel × tx001/tx002;
+  test = Zira × tx003/tx004).
+- **Reproducible:** two consecutive runs produced **byte-identical** WAVs (sha256 match on
+  all 6 baselines + 72 variants) — SAPI synth is deterministic on this machine.
+- Dashboard fix verified by the existing headless `AppTest` still booting clean.
+
+**Limitations (honest):**
+- Three MACHINE voices are still not natural human speakers; a disjoint split proves
+  generalization to an unseen SYNTHETIC speaker, not to real human delivery. Real recordings
+  remain future work and are stated as a limitation.
+- Flaws are still computer-injected (ground truth for the manipulation only).
+- Reproducibility is scoped to "same machine, same SAPI voices"; a different OS/voice-engine
+  version could change the synthesized bytes (and so the seeded flaw locations).
+- No metrics yet — detectors are unchanged (monotone over-fires, rate_deviation 0/4 from
+  Session 4); fixes + held-out numbers are Session 6b.
+
+**Next step:** Session 6b — fix monotone (word-aligned comparison) and rate_deviation
+(alignment-based local rate) on the Session 2 aligner, tune thresholds on TRAIN only, and
+report real held-out metrics on the TEST set.
+
+**Suggested commit:** `feat: multi-speaker/transcript dataset with held-out split`
+
+---

@@ -84,12 +84,8 @@ variants = [r for r in manifest if r.baseline_or_variant == "variant"]
 with st.sidebar:
     st.header("Source")
     if not baselines:
-        st.error("No baseline in the manifest. Run scripts/make_variants.py first.")
+        st.error("No baseline in the manifest. Run scripts/make_dataset.py first.")
         st.stop()
-    base_row = baselines[0]
-    st.caption(f"Baseline (reference): `{base_row.sample_id}` — "
-               f"speaker `{base_row.speaker_id}`, {base_row.sample_rate} Hz")
-
     mode = st.segmented_control("Candidate", ["From dataset", "Upload"],
                                 default="From dataset", label_visibility="collapsed")
     cand_row, cand_path, cand_bytes, reveal = None, None, None, False
@@ -99,14 +95,23 @@ with st.sidebar:
             st.info("Upload a WAV to analyze, or switch to a dataset clip.")
             st.stop()
         cand_bytes, cand_name = up.getvalue(), up.name
+        # An upload has no known speaker/pair; use the first baseline as the reference.
+        base_row = baselines[0]
     else:
         ids = [r.sample_id for r in variants]
         default = next((i for i, s in enumerate(ids) if s.endswith("long_pause_s1")), 0)
         pick = st.selectbox("Candidate clip", ids, index=default)
         cand_row = next(r for r in variants if r.sample_id == pick)
         cand_path, cand_name = str(ROOT / cand_row.audio_path), cand_row.sample_id
+        # Speaker normalization only means something against the SAME speaker's
+        # baseline, so pick the candidate's OWN pair baseline, not just baselines[0].
+        base_row = next((b for b in baselines if b.pair_id == cand_row.pair_id),
+                        baselines[0])
         reveal = st.toggle("Reveal ground truth", value=False,
                            help="Overlay the known injected interval (dashed box).")
+
+    st.caption(f"Baseline (reference): `{base_row.sample_id}` — "
+               f"speaker `{base_row.speaker_id}`, {base_row.sample_rate} Hz")
 
 
 # ---------------------------------------------------------------- main

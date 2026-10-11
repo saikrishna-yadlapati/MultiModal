@@ -123,3 +123,31 @@ tested headless with `st.testing.v1.AppTest` — no browser, no server. The deli
 is a DOCUMENTED CONSTANT formula (`100 - 8 x n_flaws`), shown verbatim in the UI, not a metric.
 Reversible: yes — the split is the stable part; either layer can be rewritten against the other's
 plain-dict interface.
+
+## 2026-10-11 — Held-out split = unseen speaker AND unseen transcript (Session 6a)
+What: The evaluation dataset is built from 3 SAPI voices (David en-US M, Hazel en-GB F,
+Zira en-US F) × 4 transcripts, split so the TEST set is a speaker never used in training
+(Zira) speaking transcripts never used in training (tx003, tx004). Only the two consistent
+blocks of the speaker×transcript grid are generated — train = {David,Hazel}×{tx001,tx002}
+(52 rows), test = {Zira}×{tx003,tx004} (26 rows). The split policy lives in one importable
+module `src/speechlab/dataset/plan.py`; `scripts/make_dataset.py` builds it and supersedes
+`scripts/make_variants.py` (single speaker).
+Why: Session 6b will TUNE detector thresholds. Tuning and testing on the same single speaker
+(the Session 1-5 state) would be tuning on the only data — leakage against our own honesty
+rule. A disjoint split by BOTH axes is the honest way to measure generalization to an unseen
+speaker on unseen words. The leakage validator (`validate_manifest`) already refuses any
+speaker/transcript that spans two splits, so the plan is kept consistent by construction.
+Evidence: 78 rows, validator clean; two generator runs produced byte-identical WAVs (sha256
+match on all baselines + variants) — SAPI synth is deterministic on this machine.
+Cost: three machine voices are still not NATURAL human speakers; external validity (real
+recordings) remains future work and is stated as a limitation.
+Reversible: yes — add/remove voices or transcripts and reassign splits in `plan.py`.
+
+## 2026-10-11 — Dashboard references the candidate's OWN pair baseline (Session 6a fix)
+What: `app/main.py` now resolves the reference baseline by the selected candidate's
+`pair_id` (same speaker+transcript), not `baselines[0]`.
+Why: With one speaker (Sessions 1-5) `baselines[0]` was always the right reference. The
+multi-speaker dataset exposed the latent bug: a Zira variant was being normalized against
+David's baseline — a cross-speaker comparison that defeats the whole point of speaker
+normalization. Uploads (no known pair) still fall back to the first baseline, captioned.
+Reversible: yes — one lookup in the sidebar.
