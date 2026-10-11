@@ -23,9 +23,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from speechlab.config import load_config  # noqa: E402
 from speechlab.dataset.manifest import read_manifest  # noqa: E402
 from speechlab.app.analysis import analyze, load_audio  # noqa: E402
+from speechlab.alignment.subprocess_align import spans_for  # noqa: E402
 
 FLAW_COLORS = {"long_pause": "#e4572e", "rate_deviation": "#f3a712",
                "monotone": "#4c6ef5"}
+ALIGN_CACHE = ROOT / "data" / "align_cache"
 
 st.set_page_config(page_title="Speech flaw grounding", layout="wide")
 
@@ -40,13 +42,35 @@ def _manifest(path: str):
     return read_manifest(path)
 
 
+@st.cache_data(show_spinner="Aligning…")
+def _spans(sample_id: str | None, audio_path: str | None, transcript: str | None):
+    """Forced-alignment spans for one clip (cache-first, subprocess on miss), or None.
+
+    None whenever we have no transcript (an upload) or alignment is unavailable — the
+    detectors then use their Session 4 fallbacks. Cached by sample_id so a Streamlit
+    rerun is a dict hit, not a re-align.
+    """
+    if not sample_id or not transcript:
+        return None
+    return spans_for(sample_id, audio_path or "", transcript, ALIGN_CACHE)
+
+
 @st.cache_data(show_spinner="Analyzing clip…")
-def _run(baseline_path: str, cand_path: str | None, cand_bytes: bytes | None) -> dict:
-    """Cached end-to-end analysis. Keyed by baseline path + candidate (path or bytes)."""
+def _run(baseline_path: str, cand_path: str | None, cand_bytes: bytes | None,
+         base_id: str | None, base_tx: str | None,
+         cand_id: str | None, cand_tx: str | None) -> dict:
+    """Cached end-to-end analysis. Keyed by baseline + candidate + their clip ids.
+
+    Resolves forced-alignment spans for the baseline and candidate (dataset clips have
+    both -> same-material detectors, matching run_eval.py's 0.79 path). Uploads have no
+    transcript -> spans stay None -> the honest Session 4 fallback runs.
+    """
     cfg = _config()
     by, bsr = load_audio(baseline_path)
     cy, csr = load_audio(cand_bytes) if cand_bytes is not None else load_audio(cand_path)
-    return analyze(cfg, by, bsr, cy, csr)
+    base_spans = _spans(base_id, baseline_path, base_tx)
+    cand_spans = _spans(cand_id, cand_path, cand_tx)
+    return analyze(cfg, by, bsr, cy, csr, base_spans, cand_spans)
 
 
 def timeline_chart(rms_df, evidence_df, duration_s, gt=None):
@@ -120,7 +144,14 @@ st.caption("Evidence-grounded coaching, not a verdict on talent. Every flaw is a
            "measured *deviation from this speaker's own baseline* — not a universal "
            "rule of 'good speaking'. Numbers come from measurement code, never prose.")
 
-res = _run(str(ROOT / base_row.audio_path), cand_path, cand_bytes)
+res = _run(str(ROOT / base_row.audio_path), cand_path, cand_bytes,
+           # Dataset clips carry a sample_id + transcript, so both get aligned spans and
+           # the same-material detectors run. An upload has no transcript and no matching
+           # baseline rendition, so ids/transcripts are None -> honest Session 4 fallback.
+           base_id=(base_row.sample_id if cand_row is not None else None),
+           base_tx=(base_row.transcript_text if cand_row is not None else None),
+           cand_id=(cand_row.sample_id if cand_row is not None else None),
+           cand_tx=(cand_row.transcript_text if cand_row is not None else None))
 ev_df = res["evidence_df"]
 flagged_s = float((ev_df["end_s"] - ev_df["start_s"]).sum()) if not ev_df.empty else 0.0
 
@@ -139,6 +170,18 @@ if guard_ok:
 else:
     st.error(f"Guard FAILED — fabricated: {res['guard_fabricated']}, "
              f"schema: {res['guard_schema']}", icon=":material/error:")
+
+# Which detectors ran — the thing demo==metrics depends on. Aligned = the same
+# same-material rate/monotone rules that scored held-out macro-F1 0.79 in run_eval.py.
+if res["aligned"]:
+    st.info("Detectors: **forced-alignment same-material** — the exact rate & monotone "
+            "rules evaluated held-out (macro-F1 0.79). Live analysis == measured metrics.",
+            icon=":material/mediation:")
+else:
+    st.warning("Detectors: **no-transcript fallback** (energy-proxy rate, typical-median "
+               "monotone). Weaker than the evaluated same-material path — rate/monotone "
+               "here are not the 0.79 detectors. Pick a dataset clip to run the aligned path.",
+               icon=":material/warning:")
 
 cols = st.columns(2)
 with cols[0]:
@@ -197,16 +240,18 @@ else:
 
 with st.expander("Limitations & honest caveats"):
     st.markdown(
-        "- **One speaker, one transcript** so far — these are computer-injected flaws, "
-        "ground truth for *that manipulation only*, not proof the detector handles "
-        "naturally-occurring human delivery flaws.\n"
-        "- **Thresholds are untuned placeholders** (one speaker, all `train`); tuning + "
-        "held-out metrics are Session 6.\n"
-        "- **Monotone** can over-fire on naturally low-variability moments; **rate** uses "
-        "an energy-peak syllable proxy, not alignment. Fixes depend on the Session 2 "
-        "aligner (Session 6).\n"
-        "- The **delivery-concern score is illustrative**, not a validated measure of "
-        "speaking quality.")
+        "- **Synthetic speakers, injected flaws.** The dataset is 3 Windows SAPI voices "
+        "× 4 transcripts with computer-injected pause/rate/pitch edits. Ground truth is "
+        "exact for *that manipulation*, not proof the detector handles naturally-occurring "
+        "human delivery flaws.\n"
+        "- **Dataset clips** run the forced-alignment *same-material* rate & monotone "
+        "detectors — the same ones scored held-out (macro-F1 0.79, see `docs/EVALUATION.md`). "
+        "**Uploads** have no transcript, so they fall back to the weaker energy-proxy rate "
+        "and typical-median monotone rules; trust `long_pause` there, not rate/monotone.\n"
+        "- **Subtlest severity (0.25) is missed** by all three detectors (a precision/recall "
+        "trade-off chosen on the train split).\n"
+        "- **The delivery-concern score is illustrative**, not a validated measure of "
+        "speaking quality — it only counts flagged deviations from this speaker's baseline.")
 
 
 

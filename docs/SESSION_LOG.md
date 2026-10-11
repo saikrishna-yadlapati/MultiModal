@@ -522,3 +522,68 @@ architecture, scoring, evaluation) + demo storyboard; then a true fresh-venv rep
 **Suggested commit:** `docs: truthful submission README + re-freeze lockfile with dashboard deps`
 
 ---
+
+## Session 7b — 2026-10-11 — Technical documentation + demo script
+**Goal:** Produce the two remaining written deliverables: the ≤6-page technical doc and the
+YouTube demo script.
+
+**Files created:**
+- `docs/TECHNICAL.md` — the ≤6-page technical overview (1855 words ≈ ~5 pages with tables):
+  problem/approach, rubric map, dataset construction, feature extraction, detection + evidence
+  contract + no-fabrication guard, held-out evaluation (real tables), scoring/dashboard,
+  reproducibility, limitations. Every number traces to `EVALUATION.md`/`config.yaml`; none typed
+  by hand.
+- `docs/DEMO_SCRIPT.md` — shot-by-shot ~5 min video script (8 shots: problem → dataset → blind
+  analyze → evidence object → ground-truth reveal → held-out metrics → honest failure → close),
+  with the exact real commands to run on camera, the AI disclosure for the description, and
+  honesty guardrails (no "detects emotion", no number not on screen).
+
+**How to test:** `wc -w docs/TECHNICAL.md` → 1855 words (≤6 pages). All commands in both docs
+were verified against the repo this session (`pytest` 41 passed; `run_eval.py` reproduced the
+quoted numbers). Every spoken/typed metric cross-checked against `EVALUATION.md`.
+
+**Actual result (VERIFIED):** both docs written and fact-checked. No fabricated numbers.
+
+**Limitations:** True fresh-venv reproduce not yet run; product name still TBD; no GitHub remote
+exists yet (repo is local-only — must be pushed public for the deliverable + teammate sharing).
+
+**Next step:** Session 7c — fresh-venv reproduce check + product-name decision + public GitHub
+push, then final submission checklist.
+
+**Suggested commit:** `docs: add ≤6-page technical documentation and demo script`
+
+---
+
+## Session 7c — 2026-10-11 — Fresh-venv reproducibility check (VERIFIED)
+**Goal:** Prove the 10%-rubric reproducibility claim honestly: that `requirements-lock.txt`
+installs clean into a brand-new environment and reproduces the held-out metrics — not just that
+the lock happens to match the already-working venv.
+
+**How tested:**
+```
+.venv\Scripts\python -m venv .venv-fresh
+.venv-fresh\Scripts\python -m pip install -r requirements-lock.txt --extra-index-url https://download.pytorch.org/whl/cpu
+.venv-fresh\Scripts\python -m pytest tests/ -q
+.venv-fresh\Scripts\python scripts/run_eval.py
+# then: rmdir .venv-fresh  (throwaway, not committed)
+```
+
+**Actual result (VERIFIED this session):**
+- Clean lockfile install succeeded; all heavy imports (torch, torchaudio, streamlit,
+  parselmouth, soundfile, numpy, scipy, pandas, altair) load in the fresh venv.
+- `pytest tests/` → **41 passed** from clean.
+- `run_eval.py` → **identical** numbers (macro-F1 0.79; long_pause P1.00/R0.50/F1 0.67 IoU 0.985;
+  rate P1.00/R0.75/F1 0.86; monotone P1.00/R0.75/F1 0.86; 0.00 false events/min; 0 guard failures).
+
+**Limitations (honest):** This was a fresh *venv* in the existing working tree, not a fresh
+*clone*. It proves the pinned environment installs and reproduces the metrics; it does NOT
+exercise a from-zero checkout (where WAVs are gitignored and a Windows teammate must run
+`make_dataset.py` first). A true fresh-clone reproduce needs a second machine (teammate task) and
+a public remote, which does not exist yet.
+
+**Next step:** product-name decision + create and push the public GitHub repo, then the final
+submission checklist (Devpost description, AI disclosure, team by real names).
+
+**Suggested commit:** (folds into the 7b docs commit; no code changed)
+
+---

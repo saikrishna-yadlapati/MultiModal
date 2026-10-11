@@ -113,12 +113,19 @@ def heuristic_score(items: list[EvidenceItem]) -> tuple[int, str]:
     return score, formula
 
 
-def analyze(cfg: dict, baseline_y, bsr, cand_y, csr) -> dict:
+def analyze(cfg: dict, baseline_y, bsr, cand_y, csr,
+            baseline_spans=None, cand_spans=None) -> dict:
     """Full dashboard analysis for one baseline + one candidate clip.
 
     Takes:  cfg (loaded config.yaml), baseline audio (baseline_y, bsr) and candidate
             audio (cand_y, csr). The detectors are BLIND — they never see any
             ground-truth interval, only the candidate audio + the baseline profile.
+            baseline_spans / cand_spans (optional): forced-alignment word spans for the
+            two clips. When BOTH are given, the rate + monotone detectors run their
+            Session 6b *same-material* rules — the exact path that scored held-out
+            macro-F1 0.79 in run_eval.py. When absent (e.g. an upload with no
+            transcript) the detectors use the weaker Session 4 fallbacks. Passing them
+            here is what makes the live demo use the SAME detectors as the metrics.
     Returns: dict with
             - reference   : the speaker profile measured on the baseline
             - evidence    : list[EvidenceItem] from all three detectors
@@ -126,12 +133,17 @@ def analyze(cfg: dict, baseline_y, bsr, cand_y, csr) -> dict:
             - score, score_formula : heuristic_score(evidence)
             - cand_rms, cand_f0, base_rms, base_f0 : plot DataFrames
             - cand_duration_s, base_duration_s
+            - aligned          : True iff the same-material (aligned) detectors ran
             - guard_fabricated : list of any fabricated numbers (MUST be empty)
             - guard_schema     : list of any schema problems (MUST be empty)
     Flow:   main.py renders every field; it adds no numbers of its own.
+
+    Knob:  there is nothing to tune here — detector thresholds live in config.yaml
+           (detection.*); this function only routes audio + spans into them.
     """
-    reference = build_reference(baseline_y, bsr, cfg)
-    evidence = detect_all(cand_y, csr, cfg, reference)
+    aligned = baseline_spans is not None and cand_spans is not None
+    reference = build_reference(baseline_y, bsr, cfg, spans=baseline_spans)
+    evidence = detect_all(cand_y, csr, cfg, reference, spans=cand_spans)
 
     # Re-run the Session 4 honesty guards here so the UI can display a trust badge.
     fabricated, schema = [], []
@@ -152,6 +164,7 @@ def analyze(cfg: dict, baseline_y, bsr, cand_y, csr) -> dict:
         "base_f0": f0_series(baseline_y, bsr, cfg),
         "cand_duration_s": len(cand_y) / csr,
         "base_duration_s": len(baseline_y) / bsr,
+        "aligned": aligned,
         "guard_fabricated": fabricated,
         "guard_schema": schema,
     }

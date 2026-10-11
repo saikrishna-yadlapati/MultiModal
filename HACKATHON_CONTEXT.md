@@ -454,7 +454,34 @@ At the point this context was created (2026-10-09):
   chosen on train); still synthetic speakers + injected flaws; CPU torch aligner segfaults on
   repeated in-process alignment (worked around one-per-process; alignments cached).
 
-When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
+### Update 2026-10-11 (Session 7 — dashboard runs the EVALUATED detectors)
+- **Bug (found by reading code, flagged by owner):** the Streamlit dashboard ran the
+  WEAK detectors, not the ones that scored held-out macro-F1 0.79. `app/analysis.py`
+  called `build_reference(...)` and `detect_all(...)` with **no alignment spans**, so the
+  live UI silently used the Session 4 FALLBACKS — energy-peak rate proxy (0/4) and
+  compare-to-typical-median monotone (123 FP). `run_eval.py` fed aligned spans and got
+  the same-material 0.79 path. Demo and metrics were running **different detectors**;
+  a judge clicking a rate/monotone clip on camera would hit the broken logic.
+- **Root cause of the omission:** the CPU torch aligner segfaults on repeated in-process
+  alignment (Session 6b), and Streamlit is one long-lived process — so alignment was left
+  out of the UI rather than crash it.
+- **Fix (VERIFIED):** new `src/speechlab/alignment/subprocess_align.py` resolves spans
+  cache-first (all 78 dataset clips are pre-cached in `data/align_cache/` → pure file read,
+  no torch, no segfault), and on a cache miss aligns in a throwaway one-alignment
+  subprocess (the Session 6b "one-per-process" workaround, isolated from Streamlit).
+  `analyze()` now threads `baseline_spans`/`cand_spans` into the detectors and reports an
+  `aligned` flag. Dataset clips → same-material rate/monotone (the 0.79 detectors);
+  uploads have no transcript → honest Session 4 fallback, labelled as weaker in the UI.
+  The screen now shows which detector path ran.
+- Tests: **44 passed** (41 prior + 3 new in `tests/test_dashboard.py`): spans load from
+  cache without spawning; with spans `analyze()` reports `aligned` and every rate/monotone
+  evidence item carries the same-material feature (never the fallback feature); without
+  spans it falls back. Headless AppTest confirms the default demo clip shows the aligned
+  same-material badge, guards clean, no exception.
+- Honest gaps unchanged: synthetic speakers + injected flaws; subtlest severity 0.25 still
+  missed; uploads (no transcript) cannot use the same-material path by construction.
+
+
 
 ## 14. OFFICIAL AND TECHNICAL LINKS
 
