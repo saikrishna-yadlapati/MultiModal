@@ -358,6 +358,22 @@ At the point this context was created (2026-10-09):
   no detectors beyond the Session 1 absolute-pause rule, no dashboard, no held-out metrics yet.
 
 
+### Update 2026-10-11 (Session 3 — controlled variants + severity sweep)
+- Seeded variant generators implemented + VERIFIED: three flaw classes
+  (`long_pause`, `rate_deviation`, `monotone`) × 4 severities = **12 variants** generated from
+  the one baseline, each with an exact ground-truth interval + transform params written to
+  `data/manifest/manifest.csv` (13 rows, validator clean). Tests: **12 passed**.
+- **Reproducible**: two `make_variants.py` runs → byte-identical WAVs (sha256 match).
+- Flaws scale with severity (measured): monotone in-segment F0 std 8.08 → 6.08/4.02/2.02/0.34 Hz;
+  rate sev1 halves a 2 s segment (pitch preserved); pause adds 0.5–2.0 s.
+- Dependency note: no new deps. `rate_deviation` uses an in-house **WSOLA** (numpy) because
+  Praat's duration resynthesis is not bit-reproducible; `monotone` uses Praat pitch resynthesis
+  (which is). See `docs/DECISIONS.md`.
+- Honest gap: still one speaker / one transcript; all `train`; computer-injected ≠ natural flaws.
+- Implementation status: dataset now has a controlled contrastive severity spectrum; still no
+  detectors beyond the Session 1 absolute-pause rule, no dashboard, no held-out metrics.
+
+
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 
 ## 14. OFFICIAL AND TECHNICAL LINKS

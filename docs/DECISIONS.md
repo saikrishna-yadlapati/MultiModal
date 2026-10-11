@@ -7,6 +7,32 @@ What: Build the Track C "Contrastive Speech Analytics & Temporal Flaw Grounding"
 Why: 75% of rubric is dataset + grounding + features — all controllable and measurable.
 Reversible: yes, but switching now is costly. Reconfirm against live Devpost rules before submitting.
 
+## 2026-10-11 — Rate-change uses WSOLA (numpy), not Praat duration resynthesis
+What: `rate_deviation` variants are time-stretched with a small in-house WSOLA
+(Waveform Similarity Overlap-Add) in `src/speechlab/dataset/variants.py::_wsola`.
+Pitch-flatten (`monotone`) still uses Praat PitchTier resynthesis.
+Why:
+- Session 3 requires "same seed => same output". Praat's *duration* resynthesis
+  (`Replace duration tier` + overlap-add) is **not** bit-reproducible — two identical
+  runs differed by up to 0.06 in amplitude (verified). Praat's *pitch* resynthesis and
+  bare resynthesis ARE bit-exact, so `monotone` keeps using Praat.
+- A plain resample would change rate AND pitch (chipmunk effect), conflating two flaw
+  classes; WSOLA preserves pitch while changing duration. Verified: a 150 Hz tone sped
+  up 2x keeps ~150 Hz, and output is byte-identical across runs.
+- librosa (its `time_stretch`) is deferred (numba/py3.13), so WSOLA is ~40 lines of numpy.
+Cost: WSOLA is a simpler stretcher than a phase vocoder; mild artifacts on strong
+transients are acceptable for a controlled flaw whose ground truth is the timing.
+Reversible: yes — swap `_wsola` for librosa later if desired.
+
+## 2026-10-11 — Monotone flattens toward the segment's LOCAL mean F0
+What: `flatten_pitch` pulls in-segment pitch toward `Get mean (curve)` over that
+segment, not the whole-clip point mean.
+Why: forcing pitch to a value outside the segment's natural range makes PSOLA glitch
+(octave errors — measured F0 std rose from 8 to 31 Hz). Flattening toward the pitch the
+speaker already used stays clean (std 8.08 -> 0.34 at severity 1.0) and is the honest
+meaning of "monotone": same phrase, pitch movement removed, not pitch shifted.
+Reversible: yes — one line in `flatten_pitch`.
+
 ## 2026-10-11 — Dashboard stack = Streamlit (not React+Vite+FastAPI)
 What: Build the dashboard in Streamlit (single Python codebase) instead of the brief's
 *proposed* (explicitly NOT locked) React+Vite+FastAPI split.

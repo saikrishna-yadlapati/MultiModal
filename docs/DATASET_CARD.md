@@ -1,6 +1,8 @@
 # DATASET CARD
 
-Status: schema defined (Session 0). No samples collected yet. Update as data is added.
+Status: schema defined (Session 0). Session 3: 1 synthetic baseline + 12 controlled
+variants (3 flaw classes × 4 severities), reproducible, ground-truth intervals in the
+manifest. Still one speaker / one transcript; natural & multi-speaker data pending.
 
 ## Design principle
 Quality over size. A cleanly aligned contrastive spectrum beats a huge noisy pile.

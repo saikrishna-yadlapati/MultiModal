@@ -21,6 +21,22 @@ features:
   silence_rel_db: -35.0   # frames this many dB below peak RMS count as silence
   min_pause_s: 0.15       # silences shorter than this are not reported as pauses
 
+# Controlled-variant generators (Session 3). Severity 0..1 = subtle..obvious.
+# These are KNOBS the owner can tune by hand; same `seed` (top of file) => same output.
+variants:
+  seg_len_s: 2.0              # length of the region rate/pitch transforms act on
+  region_min_s: 2.0          # earliest a transform may start (avoid leading silence)
+  region_pad_end_s: 3.0      # keep this much clear at the clip's end
+  long_pause:
+    severities: [0.25, 0.5, 0.75, 1.0]
+    pause_s_at_sev1: 2.0     # severity 1.0 => insert this many seconds of silence (linear)
+  rate_deviation:
+    severities: [0.25, 0.5, 0.75, 1.0]
+    factor_at_sev1: 0.5      # severity 1.0 => segment plays at this speed ratio (0.5 = 2x faster/rushed)
+  monotone:
+    severities: [0.25, 0.5, 0.75, 1.0]
+    # flatten factor k = 1 - severity (k=0 at sev 1.0 => fully monotone; k=1 => unchanged)
+
 # Placeholder detection thresholds — TO BE TUNED on train split, verified on held-out.
 detection:
   long_pause_s: 0.8          # pause longer than this (beyond baseline) flags

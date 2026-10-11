@@ -60,7 +60,7 @@ The agent figures this out from `docs/PLAN.md` + `docs/SESSION_LOG.md`, but for 
 - **Session 0** — scaffold ✅ done
 - **Session 1** — one-sample slice: features + blind pause detection ✅ done
 - **Session 2** — dataset manifest schema + test ONE forced aligner (fallback if it fails) ✅ done
-- **Session 3** — controlled variant generators (pause / rate / pitch) + severity sweep (seeded)
+- **Session 3** — controlled variant generators (pause / rate / pitch) + severity sweep (seeded) ✅ done
 - **Session 4** — baseline detectors + strict evidence objects (+ optional LLM phrasing)
 - **Session 5** — Streamlit dashboard
 - **Session 6** — held-out evaluation with real metrics (P/R/F1, IoU, FP rate)

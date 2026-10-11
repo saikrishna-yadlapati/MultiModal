@@ -155,3 +155,72 @@ with a severity sweep, each writing GT intervals + params into the manifest.
 **Suggested commit:** `feat: dataset manifest schema and torchaudio forced-alignment integration`
 
 ---
+
+## Session 3 — 2026-10-11 — Controlled contrastive variant generators + severity sweep
+**Goal:** Build deterministic (seeded) generators for the three MVP flaw classes
+(long_pause, rate_deviation, monotone), each producing a severity gradient, writing its
+exact ground-truth interval + transform params to the manifest, and reproducible
+byte-for-byte on re-run.
+
+**Files created:**
+- `src/speechlab/dataset/variants.py` — `change_rate` (WSOLA time-stretch of one segment,
+  pitch preserved, pure numpy), `flatten_pitch` (Praat PitchTier flatten toward the
+  segment's local mean), `_wsola` helper; re-exports `inject_pause`. Has a `__main__` self-check.
+- `scripts/make_variants.py` — seeded generator: for the one baseline, sweeps 4 severities
+  × 3 flaw types = 12 variants, writes WAVs + rebuilds the manifest (baseline + variants),
+  validates it. Supersedes `scripts/build_manifest.py`'s 2-row seed.
+- `tests/test_variants.py` — 5 self-checks (pure/local, no SAPI, no model download).
+
+**Files changed:**
+- `config.yaml` — added a `variants:` block (severity grids + the knobs mapping severity →
+  pause length / rate factor / flatten amount, plus segment length & safe-region bounds).
+
+**Why:** Milestone 3 (data engineering & stress testing, 30% of rubric). A controlled
+severity spectrum with known ground truth is what lets Session 6 measure detection-vs-severity.
+
+**Decisions / findings:**
+- Praat's **duration** resynthesis is NOT bit-reproducible (two runs differed up to 0.06
+  amplitude) — so rate uses an in-house **WSOLA** (numpy, bit-exact, pitch-preserving).
+  Praat's **pitch** resynthesis IS bit-exact, so monotone keeps using Praat. (`DECISIONS.md`)
+- Monotone must flatten toward the segment's **local** mean F0; forcing the global mean
+  pushed pitch out of range and made PSOLA glitch (measured F0 std 8 → 31 Hz). (`DECISIONS.md`)
+
+**How to test (Session 3 acceptance):**
+```
+.venv\Scripts\python -m pytest tests/test_variants.py -q
+.venv\Scripts\python scripts/make_variants.py
+```
+
+**Actual result (VERIFIED this session):**
+- `pytest` → **12 passed** (full suite; 5 new).
+- `make_variants.py` → wrote **13 rows** (1 baseline + 12 variants) to
+  `data/manifest/manifest.csv`; validator clean (no leakage, every variant has GT + params).
+  Seeded locations (seed 42): pause@9.949s, rate@2.261s, monotone@4.869s, 2.0 s segments.
+- **Reproducible:** two consecutive `make_variants.py` runs produced **byte-identical** WAVs
+  (sha256 match across all 12 variants).
+- **Flaws are real and scale with severity (measured on the generated files):**
+  - long_pause: clip duration 17.432 s → 17.932 / 18.432 / 18.932 / 19.432 s (sev 0.25→1.0;
+    +0.5 → +2.0 s silence inserted).
+  - rate_deviation (sev 1.0): the 2.0 s segment → 1.0 s (factor 0.5, clip 17.432 → 16.432 s);
+    pitch preserved (test: sped-up tone keeps ~150 Hz).
+  - monotone: in-segment F0 std 8.08 Hz (baseline) → **6.08 / 4.02 / 2.02 / 0.34 Hz**
+    (sev 0.25→1.0) — a clean monotonic gradient; mean pitch unchanged.
+
+**Limitations (honest):**
+- Still ONE speaker, ONE transcript (single synthetic baseline). The variant set is a
+  severity spectrum over that one pair; splits are all `train`. Real external-validity needs
+  more speakers / natural recordings (later).
+- WSOLA is a basic stretcher; strong transients can get mild artifacts (acceptable — GT is
+  the timing). `flatten_pitch` raises if a chosen segment is mostly unvoiced (fail-loud, not
+  silently mislabeled).
+- These are computer-injected flaws = ground truth for *that manipulation only*, not proof
+  the detector handles naturally-occurring human delivery flaws.
+- Variant locations are seeded-random within a safe region; they are not yet guaranteed to
+  avoid natural pauses (monotone@4.869s spans a sentence boundary and still flattens cleanly).
+
+**Next step:** Session 4 — transparent baseline detectors (pause / rate / monotone) with
+speaker-aware normalization + strict evidence objects; run them blind on this variant set.
+
+**Suggested commit:** `feat: controlled contrastive variant generators with severity sweep`
+
+---
