@@ -415,3 +415,64 @@ report real held-out metrics on the TEST set.
 **Suggested commit:** `feat: multi-speaker/transcript dataset with held-out split`
 
 ---
+
+## Session 6b — honest detector fixes + tuned held-out metrics (VERIFIED)
+
+**Files changed:**
+- `src/speechlab/features/local.py` — added `same_material_rate_regions()` (summed-window
+  run finder: candidate vs baseline word durations for the SAME words) and
+  `same_material_monotone_regions()` + `_pooled_f0_std()` (candidate vs baseline pooled F0
+  std over the SAME words). The Session 4 energy-proxy / typical-median helpers remain for
+  the no-transcript fallback.
+- `src/speechlab/detection/detectors.py` — `detect_rate_deviation` and `detect_monotone`
+  now use same-material comparison when baseline+candidate forced-alignment spans are
+  present (fall back to the old rules otherwise). `build_reference` stores the baseline
+  word spans and baseline F0 contour. `detect_all` passes spans to both detectors.
+- `config.yaml` — new honest-rule knobs; thresholds TUNED ON TRAIN (see below).
+- `scripts/tune_thresholds.py` — NEW. Sweeps each flaw's knobs on the TRAIN split only,
+  scores F1 (negatives = clean + other-flaw variants), prints the winner. Never sees test.
+- `scripts/align_one.py` — NEW. Aligns one clip per process (the CPU torch aligner
+  segfaults when many alignments share a process; one-per-process via subprocess is stable).
+- `tests/test_rate.py`, `tests/test_monotone.py` — pure self-checks for the two new rules.
+- `docs/EVALUATION.md` — Results section filled with the real held-out numbers + 4 failures.
+
+**Why:** Session 4 detectors were dishonest/broken (rate_deviation 0/4; monotone 123 FP).
+The same-material idea — compare each word to how the SAME speaker said the SAME word in
+the baseline — cancels natural speed/prosody and is the honest fix. Milestone 6b requires
+real held-out metrics with thresholds tuned only on train.
+
+**How to run/test:**
+```
+.venv\Scripts\python -m pytest tests/ -q
+.venv\Scripts\python scripts/tune_thresholds.py     # train-only threshold search
+.venv\Scripts\python scripts/run_eval.py            # held-out metrics on test split
+```
+
+**Actual result (VERIFIED this session):**
+- Full suite **41 passed** (28 prior + 13 new rate/monotone/metrics checks).
+- Train tuning winners: long_pause excess=0.2 (F1 0.86, tie 0.1–0.3); rate speedup=0.25,
+  min_words=3 (F1 0.86); monotone ratio=0.7, min_words=3 (F1 0.84).
+- Held-out test (thresholds NOT tuned on test): macro-F1 **0.79**.
+  - long_pause P1.00 R0.50 F1 0.67 (IoU 0.985)
+  - rate_deviation P1.00 R0.75 F1 0.86 (IoU 0.770) — was 0/8 before the fix
+  - monotone P1.00 R0.75 F1 0.86 (IoU 0.808) — was 123 FP / P0.06 before the fix
+  - **0.00 false events / minute** on clean speech; no-fabrication guard **0** failures.
+- All misses are the subtlest severity (0.25); long_pause also misses 0.5. Reported in
+  EVALUATION.md, not cherry-picked.
+
+**Limitations (honest):**
+- Severity-0.25 flaws are below the zero-false-alarm threshold for every detector; recall is
+  bought with precision, chosen on train toward precision.
+- Still synthetic speakers + computer-injected flaws (ground truth is the manipulation).
+- Rate/monotone run boundaries are word-quantized (looser IoU than long_pause).
+- CPU torch aligner segfaults on repeated in-process alignment; worked around with
+  one-alignment-per-process. Alignments are cached as small JSON span files in
+  `data/align_cache/` — recommend committing them so the held-out numbers reproduce
+  without re-running the flaky aligner (owner's call on repo hygiene).
+
+**Next step:** Session 7 — surface the EvidenceItem + localization in the Streamlit
+dashboard (the 15% rubric slice), or add a confidence/calibration signal.
+
+**Suggested commit:** `feat: honest same-material rate/monotone detectors + held-out metrics`
+
+---

@@ -42,14 +42,25 @@ variants:
 # speaker's baseline, so these are deviation knobs, not absolute cutoffs.
 detection:
   long_pause_s: 0.8            # (Session 1 slice only) absolute long-pause cutoff
-  long_pause_excess_s: 0.3     # Session 4: flag a pause this many seconds longer than
-                               # the baseline speaker's LONGEST natural pause
+  long_pause_excess_s: 0.2     # TUNED on train (Session 6b-4): F1 0.86 across 0.1–0.3 (tie),
+                               # chose the conservative middle. Flag a pause this many
+                               # seconds longer than the baseline's LONGEST natural pause.
+  # Session 6b honest rate rule: compare the SAME words in candidate vs baseline.
+  rate_speedup_ratio: 0.25     # TUNED on train (6b-4): F1 0.86 across 0.2–0.25 (tie), chose
+                               # 0.25. Flag a word-run whose candidate duration is >= this
+                               # fraction shorter than the baseline said it (cand/base <= 0.8).
+  rate_min_words: 3            # the rushed run must be at least this many consecutive words
+  # Fallback energy-proxy path (used only when no transcript/alignment is available):
   rate_window_s: 1.0           # sliding-window length for local syllable rate
   rate_hop_s: 0.25             # how far that window steps each reading
   rate_deviation_ratio: 0.35   # flag a window > this fraction above baseline's fastest rate
-  monotone_window_s: 1.0       # sliding-window length for local pitch variability
-  monotone_hop_s: 0.25         # how far that window steps each reading
-  monotone_f0_std_ratio: 0.5   # flag a window whose F0 std < this * baseline typical std
+  monotone_f0_std_ratio: 0.7   # TUNED on train (6b-4): F1 0.84 (best; vs 0.80 at 0.5–0.65).
+                               # Flag a word-run whose candidate pitch std is <= this * the
+                               # baseline's std for the SAME words. Higher = catches subtler
+                               # flattening, at some precision cost (train prec 0.87).
+  monotone_min_words: 3        # word-window width / smallest monotone run flagged
+  monotone_window_s: 1.0       # (fallback, no-transcript path) sliding-window length
+  monotone_hop_s: 0.25         # (fallback) how far that window steps each reading
 
 evaluation:
   iou_match_threshold: 0.3   # predicted/true interval overlap to count as a hit

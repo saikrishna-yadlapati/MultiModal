@@ -15,16 +15,25 @@ from __future__ import annotations
 import numpy as np
 
 from ..features.f0 import f0_contour
-from ..features.local import local_f0_std, local_syllable_rate
+from ..features.local import (
+    local_f0_std, local_syllable_rate, same_material_monotone_regions,
+    same_material_rate_regions,
+)
 from ..features.pauses import detect_silences
 from .evidence import EvidenceItem
 
 
-def build_reference(y: np.ndarray, sr: int, cfg: dict) -> dict:
+def build_reference(y: np.ndarray, sr: int, cfg: dict, spans=None) -> dict:
     """Measure the baseline once; these numbers are every detector's 'normal'.
 
-    Returns a dict with: longest natural pause, fastest natural local syllable rate,
-    and the typical (median) local pitch variability. All speaker-specific.
+    Returns a dict with: longest natural pause, fastest natural local rate, the typical
+    (median) local pitch variability, and which rate method was used. All speaker-specific.
+
+    `spans` (optional): the baseline's forced-alignment word spans. When given, the
+    rate detector works same-material (candidate words vs the SAME baseline words), so the
+    baseline spans are stored on the profile. The fastest natural energy-proxy rate is also
+    kept as a fallback for uploads with no transcript. The candidate detector picks the
+    matching method — see detect_rate_deviation.
     """
     f = cfg["features"]
     d = cfg["detection"]
@@ -32,6 +41,7 @@ def build_reference(y: np.ndarray, sr: int, cfg: dict) -> dict:
                                f["silence_rel_db"], f["min_pause_s"])
     longest_pause = max((e - s for s, e in silences), default=0.0)
 
+    # Fallback energy-proxy fastest natural rate (used only when no transcript is available).
     rate_win = local_syllable_rate(y, sr, f["frame_length_s"], f["hop_length_s"],
                                    d["rate_window_s"], d["rate_hop_s"])
     max_rate = max((w["rate_hz"] for w in rate_win), default=0.0)
@@ -41,6 +51,8 @@ def build_reference(y: np.ndarray, sr: int, cfg: dict) -> dict:
     typical_f0_std = float(np.median([w["std_hz"] for w in f0_win])) if f0_win else 0.0
 
     return {"longest_pause_s": longest_pause, "max_local_rate_hz": max_rate,
+            "baseline_spans": spans,
+            "baseline_f0_times": times, "baseline_f0": f0,
             "typical_local_f0_std_hz": typical_f0_std}
 
 
@@ -80,13 +92,46 @@ def detect_long_pause(y, sr, cfg, ref) -> list[EvidenceItem]:
     return out
 
 
-def detect_rate_deviation(y, sr, cfg, ref) -> list[EvidenceItem]:
-    """Flag windows whose local syllable rate is far above the speaker's fastest natural."""
+def detect_rate_deviation(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
+    """Flag runs of words the candidate rushes relative to its OWN baseline rendition.
+
+    Session 6b honest rule: baseline and candidate speak the SAME transcript, so each word
+    lines up. A rushed (time-compressed) segment makes those words shorter in the candidate
+    than the baseline said them. Comparing the SAME words (same-material) cancels natural
+    speaker speed and is far more sensitive than the Session 4 energy proxy that scored 0/4.
+
+    When baseline spans (ref["baseline_spans"]) and candidate `spans` are both present it
+    uses that same-material comparison; otherwise (e.g. an upload with no transcript) it
+    falls back to the energy-peak syllable proxy vs the speaker's fastest natural window.
+    """
     f, d = cfg["features"], cfg["detection"]
+    base_spans = ref.get("baseline_spans")
+    if spans is not None and base_spans is not None:
+        regions = same_material_rate_regions(base_spans, spans,
+                                              d["rate_speedup_ratio"], d["rate_min_words"])
+        pct = d["rate_speedup_ratio"] * 100
+        out = []
+        for r in regions:
+            out.append(EvidenceItem(
+                flaw_type="rate_deviation",
+                interval_s=[round(r["start_s"], 3), round(r["end_s"], 3)],
+                feature="same_word_local_rate_hz",
+                reference_value=round(r["base_rate_hz"], 2),
+                candidate_value=round(r["cand_rate_hz"], 2),
+                rule=(f"{r['n_words']} words spoken at {r['cand_rate_hz']:.2f}/s vs this "
+                      f"speaker's {r['base_rate_hz']:.2f}/s for the SAME words "
+                      f"(>= {pct:.0f}% faster)"),
+                uncertainty=("Rate from forced-alignment word durations; alignment can "
+                             "smear word boundaries, and the run edges are word-quantized.")))
+        return out
+
+    # Fallback: no transcript/alignment — energy-peak syllable proxy vs fastest natural.
     base = ref["max_local_rate_hz"]
     thresh = base * (1.0 + d["rate_deviation_ratio"])
     win = local_syllable_rate(y, sr, f["frame_length_s"], f["hop_length_s"],
                               d["rate_window_s"], d["rate_hop_s"])
+    unc = ("Rate is an energy-peak syllable proxy, not phonetic; the window edges "
+           "are coarse and no alignment is used.")
     hot = [(w["start_s"], w["end_s"], w["rate_hz"]) for w in win if w["rate_hz"] > thresh]
     out = []
     for s, e in _merge([(a, b) for a, b, _ in hot]):
@@ -97,17 +142,49 @@ def detect_rate_deviation(y, sr, cfg, ref) -> list[EvidenceItem]:
             candidate_value=round(peak, 2),
             rule=(f"local rate {peak:.2f}/s exceeds this speaker's fastest natural "
                   f"{base:.2f}/s by > {d['rate_deviation_ratio']*100:.0f}%"),
-            uncertainty=("Rate is an energy-peak syllable proxy, not phonetic; the "
-                         "window edges are coarse and no alignment is used.")))
+            uncertainty=unc))
     return out
 
 
-def detect_monotone(y, sr, cfg, ref) -> list[EvidenceItem]:
-    """Flag windows whose local pitch variability is far below the speaker's typical."""
+def detect_monotone(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
+    """Flag runs of words the candidate speaks far flatter than its OWN baseline said them.
+
+    Session 6b honest rule: same-material, like the rate detector. Baseline and candidate
+    speak the same transcript; a monotone (pitch-flattened) stretch has much less pitch
+    movement across the SAME words in the candidate than the baseline. Comparing a word to
+    itself cancels natural prosody — the Session 4 "below the speaker's typical variability"
+    rule produced 123 false positives because natural speech has many genuinely flat windows.
+
+    When baseline F0+spans (on ref) and candidate `spans` are present it uses that
+    comparison; otherwise it falls back to the Session 4 typical-median window rule.
+    """
     f, d = cfg["features"], cfg["detection"]
+    times, f0 = f0_contour(y, sr, f["f0_min_hz"], f["f0_max_hz"], f["hop_length_s"])
+    base_spans = ref.get("baseline_spans")
+    base_times = ref.get("baseline_f0_times")
+    base_f0 = ref.get("baseline_f0")
+    if spans is not None and base_spans is not None and base_f0 is not None:
+        regions = same_material_monotone_regions(
+            base_times, base_f0, times, f0, base_spans, spans,
+            d["monotone_f0_std_ratio"], d["monotone_min_words"])
+        out = []
+        for r in regions:
+            out.append(EvidenceItem(
+                flaw_type="monotone",
+                interval_s=[round(r["start_s"], 3), round(r["end_s"], 3)],
+                feature="same_word_f0_std_hz",
+                reference_value=round(r["base_std_hz"], 2),
+                candidate_value=round(r["cand_std_hz"], 2),
+                rule=(f"{r['n_words']} words with pitch std {r['cand_std_hz']:.2f}Hz vs this "
+                      f"speaker's {r['base_std_hz']:.2f}Hz for the SAME words "
+                      f"(<= {d['monotone_f0_std_ratio']:.2f}x)"),
+                uncertainty=("Pitch std from pooled voiced frames per word run; voiceless "
+                             "or short words contribute little, and run edges are word-quantized.")))
+        return out
+
+    # Fallback: no transcript/alignment — compare each window to the speaker's typical std.
     base = ref["typical_local_f0_std_hz"]
     thresh = base * d["monotone_f0_std_ratio"]
-    times, f0 = f0_contour(y, sr, f["f0_min_hz"], f["f0_max_hz"], f["hop_length_s"])
     win = local_f0_std(times, f0, d["monotone_window_s"], d["monotone_hop_s"])
     cold = [(w["start_s"], w["end_s"], w["std_hz"]) for w in win if w["std_hz"] < thresh]
     out = []
@@ -129,9 +206,14 @@ DETECTORS = {"long_pause": detect_long_pause,
              "monotone": detect_monotone}
 
 
-def detect_all(y, sr, cfg, ref) -> list[EvidenceItem]:
-    """Run every detector blind on one candidate; return all evidence items."""
+def detect_all(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
+    """Run every detector blind on one candidate; return all evidence items.
+
+    `spans` (optional forced-alignment word spans) is used by the rate and monotone
+    detectors (Session 6b same-material rules). None keeps the Session 4 fallbacks.
+    """
     items = []
-    for fn in DETECTORS.values():
-        items.extend(fn(y, sr, cfg, ref))
+    items.extend(detect_long_pause(y, sr, cfg, ref))
+    items.extend(detect_rate_deviation(y, sr, cfg, ref, spans=spans))
+    items.extend(detect_monotone(y, sr, cfg, ref, spans=spans))
     return items

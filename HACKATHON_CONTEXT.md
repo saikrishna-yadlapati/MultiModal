@@ -431,6 +431,29 @@ At the point this context was created (2026-10-09):
 - Honest gap: three machine voices ≠ natural human speakers; still computer-injected flaws;
   no metrics yet. Detector fixes (monotone/rate) + real held-out numbers are Session 6b.
 
+### Update 2026-10-11 (Session 6b — honest detector fixes + tuned held-out metrics)
+- Both broken detectors fixed with the **same-material** idea: compare each word to how the
+  SAME speaker said the SAME word in its own baseline (forced-alignment spans line words up
+  by index), which cancels natural speed/prosody.
+  - rate_deviation: slide a word-window, compare summed candidate vs baseline durations
+    (`same_material_rate_regions`). Summed window survives alignment's floor-pinned function
+    words that broke a per-word rule.
+  - monotone: pool voiced F0 over a word-window, compare candidate vs baseline pitch std
+    (`same_material_monotone_regions`). Kills the 123 false positives from the old
+    compare-to-typical-median rule.
+  - Both keep the Session 4 energy-proxy / typical-median path as a no-transcript fallback.
+- Thresholds TUNED ON TRAIN ONLY (`scripts/tune_thresholds.py`), verified on the held-out
+  test split. Winners in `config.yaml`: long_pause excess 0.2; rate speedup 0.25 / min_words 3;
+  monotone ratio 0.7 / min_words 3.
+- **VERIFIED held-out metrics** (`scripts/run_eval.py`, test = Zira × tx003/tx004):
+  macro-F1 **0.79**; long_pause P1.00/R0.50/F1 0.67; rate P1.00/R0.75/F1 0.86 (was 0/8);
+  monotone P1.00/R0.75/F1 0.86 (was 123 FP). **0.00 false events/min** on clean speech;
+  no-fabrication guard **0** failures. Full numbers + 4 failure cases in `docs/EVALUATION.md`.
+  Tests: **41 passed**.
+- Honest gaps: subtlest severity (0.25) missed by all three (precision/recall trade-off,
+  chosen on train); still synthetic speakers + injected flaws; CPU torch aligner segfaults on
+  repeated in-process alignment (worked around one-per-process; alignments cached).
+
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 
 ## 14. OFFICIAL AND TECHNICAL LINKS
