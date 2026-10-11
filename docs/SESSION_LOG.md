@@ -476,3 +476,49 @@ dashboard (the 15% rubric slice), or add a confidence/calibration signal.
 **Suggested commit:** `feat: honest same-material rate/monotone detectors + held-out metrics`
 
 ---
+
+## Session 7a — 2026-10-11 — Submission polish: truthful README + fixed dependency manifests
+**Goal:** Start Session 7 (submission polish) with the two things that were actively WRONG:
+(1) the dependency files, and (2) the README. Both block the 10% reproducibility rubric and a
+fresh-environment reproduce.
+
+**Bug found + fixed (reproducibility):** `requirements-lock.txt` was last frozen in Session 2
+(24 lines) and never re-frozen after Session 5 added the dashboard — it was **missing
+`streamlit`, `altair`, `pandas`**, all of which the installed env has and the dashboard needs.
+`requirements.txt` still listed `streamlit`/`plotly` under "DEFERRED (not needed yet)". A fresh
+`pip install -r requirements-lock.txt` would therefore NOT install the dashboard deps.
+
+**Files changed:**
+- `requirements-lock.txt` — re-frozen from the real venv (now 57 lines; adds streamlit 1.65.0,
+  altair 6.3.0, pandas 3.0.6 + their deps).
+- `requirements.txt` — moved streamlit/altair out of DEFERRED into active deps, added pandas,
+  dropped the stale "plotly" mention (we use Altair — Session 5 decision).
+- `README.md` — full rewrite from the stale Session-0 "scaffolding only, no pipeline yet" text
+  to a truthful submission-grade README: real status (41 passed, Sessions 0–6b done), real
+  held-out headline table (macro-F1 0.79, 0 FP, 0 false events/min), setup incl. the torch CPU
+  index, run commands, reproducibility notes, dataset/licensing, honest limitations, and the
+  AI-tool disclosure tied to the no-fabrication guard. Every number traces to `EVALUATION.md`.
+
+**How to test:**
+```
+.venv\Scripts\python -m pytest tests/ -q
+.venv\Scripts\python scripts/run_eval.py
+```
+
+**Actual result (VERIFIED this session):**
+- `pytest` → **41 passed** in ~2 s.
+- `run_eval.py` → reproduced the exact README/EVALUATION numbers from cached alignments
+  (long_pause P1.00/R0.50/F1 0.67; rate P1.00/R0.75/F1 0.86; monotone P1.00/R0.75/F1 0.86;
+  macro-F1 0.79; 0.00 false events/min; 0 guard failures).
+- `requirements-lock.txt` now contains streamlit/altair/pandas (grep-confirmed).
+
+**Limitations:** True fresh-venv install was NOT run this step (verified the lock matches the
+working venv via `pip freeze`, not a clean rebuild). The ≤6-page technical doc, demo
+storyboard/script, product name, and dataset-license finalization are still pending.
+
+**Next step:** Session 7b — the ≤6-page technical documentation (dataset construction, rubric,
+architecture, scoring, evaluation) + demo storyboard; then a true fresh-venv reproduce check.
+
+**Suggested commit:** `docs: truthful submission README + re-freeze lockfile with dashboard deps`
+
+---
