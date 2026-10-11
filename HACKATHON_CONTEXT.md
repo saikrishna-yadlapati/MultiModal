@@ -392,6 +392,28 @@ At the point this context was created (2026-10-09):
 - Implementation status: measurement→evidence→phrasing pipeline exists and is guard-enforced;
   long_pause is reliable, monotone/rate need alignment-based fixes; no dashboard yet.
 
+### Update 2026-10-11 (Session 5 — interactive Streamlit dashboard)
+- Dashboard added as two layers: `src/speechlab/app/analysis.py` (pure Python, zero `st.*`) wraps
+  the Session 1-4 feature/detection code, re-runs the Session 4 honesty guards, and returns a
+  plain dict (DataFrames + evidence + guard results + heuristic score). `src/speechlab/app/main.py`
+  is a thin Streamlit script that only arranges/displays that dict — it computes no numbers itself.
+- UI: pick a dataset variant or upload a WAV; baseline + candidate audio players; a loudness
+  timeline with the detected flaw intervals shaded (Altair layered `mark_rect`); a voiced-pitch
+  contour; per-flaw evidence cards (deterministic sentence + this-speaker's-baseline vs candidate
+  table + the rule that fired); an optional dashed overlay of the known ground-truth interval
+  ("Reveal ground truth" — detector never saw it); a limitations expander.
+- **Honesty contract carried to the screen**: the Session 4 guards are re-run and shown as a trust
+  badge ("0 fabricated numbers, all evidence objects valid"). The delivery-concern score is a
+  DOCUMENTED CONSTANT formula (`100 - 8 x n_flaws`), shown verbatim, explicitly framed as NOT a
+  validated metric — it ranks only this clip's deviations from its own baseline.
+- Charts use Altair (bundled with Streamlit, no new dep) instead of the Plotly named in
+  ARCHITECTURE.md — minor, recorded in DECISIONS.md. No change to track/scope.
+- Tests: **23 passed** (19 prior + 4 new in `tests/test_dashboard.py`): pure-logic pytest for the
+  score formula / guards / evidence frame, plus a headless `st.testing.v1.AppTest` that boots
+  `main.py` with no exception, renders the 4 KPI metrics, and shows the clean-guard success badge.
+- Limitations unchanged from Session 4 (one speaker, untuned thresholds, monotone over-fires, rate
+  0/4); those detector fixes + held-out metrics remain Session 6.
+
 
 When a decision changes, update this section with date, what changed, why, and evidence. Don't preserve superseded plans as if they remain active.
 

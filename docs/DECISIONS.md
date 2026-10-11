@@ -100,3 +100,26 @@ word-aligned same-material comparison); rate_deviation 0/4 (energy-peak syllable
 real speech, needs alignment-based rate). The monotone/rate fixes depend on the Session 2
 aligner and are scheduled for Session 6.
 Reversible: yes — thresholds are config; detectors are swappable modules.
+
+## 2026-10-11 — Dashboard charts use Altair, not Plotly (Session 5)
+What: The Streamlit dashboard (`src/speechlab/app/`) draws its timeline and pitch charts with
+Altair, which ships bundled with Streamlit, instead of Plotly (named in ARCHITECTURE.md). The
+timeline is a layered Altair chart: a loudness line + `mark_rect` bands for the detected flaw
+intervals + an optional dashed `mark_rect` for the revealed ground-truth interval.
+Why: Altair adds no new dependency (Plotly is a separate install), the Streamlit skill prefers
+it, and layered `mark_rect` bands express "shade these intervals on a timeline" directly — the
+exact thing this project localizes. Minor deviation from the architecture doc, no scope change.
+Reversible: yes — charts are three functions in a thin UI layer (`main.py`); the pure analysis
+layer (`analysis.py`) is chart-agnostic and could feed Plotly instead unchanged.
+
+## 2026-10-11 — Dashboard split into pure analysis.py + thin main.py (Session 5)
+What: All numbers come from `app/analysis.py` (plain Python, zero `st.*`): it wraps the Session
+1-4 feature/detection code and re-runs the Session 4 honesty guards, returning a dict of
+DataFrames + evidence + guard results + the heuristic score. `app/main.py` is a Streamlit script
+that only arranges and displays that dict — it computes no numbers of its own.
+Why: Keeps the no-fabrication contract intact all the way to the screen (the guard result is
+shown as a trust badge), and makes the logic unit-testable with plain pytest while the UI is
+tested headless with `st.testing.v1.AppTest` — no browser, no server. The delivery-concern score
+is a DOCUMENTED CONSTANT formula (`100 - 8 x n_flaws`), shown verbatim in the UI, not a metric.
+Reversible: yes — the split is the stable part; either layer can be rewritten against the other's
+plain-dict interface.

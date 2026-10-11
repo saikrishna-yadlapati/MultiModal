@@ -301,3 +301,53 @@ and the held-out split.
 **Suggested commit:** `feat: baseline detectors and structured evidence objects`
 
 ---
+
+## Session 5 — Interactive Streamlit dashboard (2026-10-11) — DONE / VERIFIED
+
+**Goal:** A dashboard that loads a speech clip, analyzes it blind against this speaker's
+baseline, and *shows* the detected flaw intervals on a timeline — with the honesty guard
+carried all the way to the screen.
+
+**Acceptance test:** `streamlit run src/speechlab/app/main.py` loads, analyzes a sample, and
+shows the detected intervals; headless `AppTest` boots the script with no exception and renders
+the metrics + evidence. **PASS.**
+
+**What was built:**
+- `src/speechlab/app/analysis.py` — pure analysis layer (NO `st.*`): `load_audio` (path/bytes/
+  file-like), `rms_series`/`f0_series` (plot DataFrames reusing the SAME feature code the
+  detectors see), `evidence_to_frame`, `heuristic_score`, and `analyze(cfg, base_y, bsr, cand_y,
+  csr) -> dict`. `analyze` re-runs the Session 4 guards (`validate_evidence`,
+  `check_no_fabricated_numbers`) so the UI can display a trust badge.
+- `src/speechlab/app/main.py` — thin Streamlit script: sidebar source picker (dataset variant or
+  WAV upload), baseline + candidate players, loudness timeline with shaded detected intervals
+  (Altair layered `mark_rect`), voiced-pitch contour, per-flaw evidence cards, "Reveal ground
+  truth" dashed overlay (blind detector never saw it), limitations expander, guard trust badge.
+- `tests/test_dashboard.py` — 4 tests (3 pure-logic pytest + 1 headless `AppTest`).
+
+**Verified results:**
+- Full suite **23 passed** (19 prior + 4 new) in ~3 s.
+- Pure-logic: score formula is exactly `max(0, 100 - 8*n)`; on a synthetic baseline + injected
+  2 s pause, `analyze` catches a `long_pause`, score drops, and **both guards clean**
+  (0 fabricated numbers, 0 schema errors).
+- Headless UI: `AppTest.from_file(main.py).run()` → no exception; 4 KPI metrics render;
+  guard-success badge shows (not the error badge); "Evidence" section present.
+
+**Decisions recorded in docs/DECISIONS.md:** charts use Altair (bundled, no new dep) instead of
+Plotly; dashboard split into pure `analysis.py` + thin `main.py` so the no-fabrication contract
+and unit-testability both hold.
+
+**Limitations (honest):**
+- Everything the detectors show inherits Session 4's limits — one speaker, computer-injected
+  flaws, untuned placeholder thresholds, monotone over-fires on natural low-variability windows,
+  rate_deviation 0/4 on real speech. The dashboard displays these faithfully; it does not fix them.
+- The delivery-concern score is an illustrative transparent formula, NOT a validated measure of
+  speaking quality (shown framed as such in the UI).
+- `AppTest` cannot simulate on-chart selection / real browser rendering; the headless test covers
+  "script runs and shows the right elements", not pixel layout.
+
+**Next step:** Session 6 — alignment-based fixes (monotone normalization + rate rebuild on the
+Session 2 aligner), threshold tuning, and a real held-out split with reported metrics.
+
+**Suggested commit:** `feat: interactive Streamlit dashboard`
+
+---
