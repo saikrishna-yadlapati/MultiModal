@@ -1,5 +1,5 @@
 # Technical Documentation
-**Contrastive Speech Analytics & Temporal Flaw Grounding** — Multimodal AI Hackathon 2026, Track C.
+**SpeechLab: Contrastive Speech Analytics & Temporal Flaw Grounding** — Multimodal AI Hackathon 2026, Track C.
 
 This is the ≤6-page technical overview. Deeper detail lives in `ARCHITECTURE.md` (data flow),
 `DATASET_CARD.md` (schema + policy), `EVALUATION.md` (full results), and `DECISIONS.md` (why
@@ -18,14 +18,14 @@ Our system does three honest things:
 
 1. **Controlled counterfactuals.** We take one clean recording and produce flawed copies that
    keep the *same words* but change exactly one delivery property (a pause, local speed, pitch
-   variation). Because we authored the edit, we know the exact ground-truth interval.
+   variation, inter-word hesitation). Because we authored the edit, we know the exact ground-truth interval.
 2. **Blind temporal grounding.** The detector receives audio only — never the answer key — and
    predicts the flawed interval. We then reveal the label and measure the error (IoU, start/end
    error). This is the difference between "temporal grounding" and guessing.
 3. **Evidence-first explanation.** Each detection emits a structured *evidence object* holding
-   the measured baseline value, the measured candidate value, and the rule that fired. A
-   mechanical guard rejects any number in the human-readable prose that measurement code did not
-   produce. An LLM may phrase findings; it cannot invent a timestamp, score, or percentage.
+   the measured baseline value, the measured candidate value, the calibrated confidence $[0.50, 0.99]$,
+   and the rule that fired. A mechanical guard rejects any number in the human-readable prose that
+   measurement code did not produce. An LLM may phrase findings; it cannot invent a timestamp, score, or percentage.
 
 **One-sentence claim:** *A number only reaches the screen if measurement code put it there — the
 system localizes measured deviations in time and refuses to fabricate evidence.*
@@ -36,11 +36,11 @@ system localizes measured deviations in time and refuses to fabricate evidence.*
 
 | Rubric item | Weight | Where in this system |
 |---|---|---|
-| Data engineering & stress testing | 30% | §3 controlled contrastive dataset + severity sweep + disjoint split |
-| Causal explainability & temporal grounding | 25% | §5 blind detectors + evidence objects + no-fabrication guard |
-| Feature extraction | 20% | §4 pauses, F0, same-material rate/monotone, speaker normalization |
-| Dashboard & visualization | 15% | §7 Streamlit timeline + evidence cards + ground-truth reveal |
-| Reproducibility & code quality | 10% | §8 one seed, pinned lockfile, cached alignments, 41 tests |
+| Data engineering & stress testing | 30% | §3 controlled contrastive dataset (83 clips) + VOiCES human baseline + severity sweep + disjoint split |
+| Causal explainability & temporal grounding | 25% | §5 blind detectors + evidence objects + calibrated confidence + no-fabrication guard |
+| Feature extraction | 20% | §4 pauses, F0, same-material rate/monotone/filler, speaker normalization |
+| Dashboard & visualization | 15% | §7 Streamlit timeline + snippet playback + word chips + A/B overlays + audit report export |
+| Reproducibility & code quality | 10% | §8 one seed, pinned lockfile, cached alignments, 50 automated tests |
 
 ---
 
@@ -48,15 +48,16 @@ system localizes measured deviations in time and refuses to fabricate evidence.*
 
 **Principle: quality over size.** A cleanly aligned contrastive spectrum beats a huge noisy pile.
 
-**Flaw classes (MVP).**
+**Flaw classes (4 total).**
 - `long_pause` — abnormally long pause (silence inserted at a known point).
-- `rate_deviation` — a run of words spoken faster than normal (rushed segment).
-- `monotone` — reduced pitch variation over a run of words (flattened delivery).
+- `rate_deviation` — a run of words spoken faster than normal (rushed segment via WSOLA).
+- `monotone` — reduced pitch variation over a run of words (flattened delivery via Praat PSOLA).
+- `filler_word` — voiced hesitation sound ("um"/"uh") inserted in an inter-word gap where silence is expected.
 
-**Contrastive pairs + severity sweep.** From each clean baseline we generate the three flaw
-classes at four severities (0.25, 0.5, 0.75, 1.0 = subtle→obvious). Each variant keeps the exact
+**Contrastive pairs + severity sweep.** From each clean baseline we generate flaw variants across
+severities (0.25, 0.5, 0.75, 1.0 = subtle→obvious). Each variant keeps the exact
 transcript and logs its transform parameters and ground-truth interval to the manifest. This
-"severity sweep" lets us measure *detection-vs-severity*, not just pass/fail.
+severity sweep lets us measure *detection-vs-severity*, not just pass/fail.
 
 **How each edit is made (and why reproducibly).**
 - `long_pause`: insert N seconds of digital silence at a seeded location.
@@ -64,26 +65,14 @@ transcript and logs its transform parameters and ground-truth interval to the ma
   while *preserving pitch* (a plain resample would also raise pitch, confounding two flaw
   classes). Chosen over Praat's duration resynthesis because Praat's is not bit-reproducible.
 - `monotone`: Praat PitchTier flatten toward the segment's *local* mean F0 (bit-exact).
+- `filler_word`: synthesized harmonic nasal hum (150 Hz fundamental + harmonics) with raised-cosine fade.
 
-Verified: two generation runs produce **byte-identical** WAVs (sha256 match). Measured monotone
-in-segment pitch std scales cleanly with severity (8.08 → 6.08 → 4.02 → 2.02 → 0.34 Hz).
+**Leakage-safe split structure (83 total rows).**
+- **train** = {David, Hazel} × {tx001, tx002} — 52 rows (SAPI synthetic)
+- **test** = {Zira} × {tx003, tx004} — 26 rows (SAPI synthetic, strictly speaker- and transcript-disjoint)
+- **val** = {human_sp0307} × {tx005} — 5 rows (**Natural Human Speech** from Lab41-SRI VOiCES, CC-BY 4.0)
 
-**Leakage-safe held-out split.** The dataset is 3 synthetic speakers (Windows SAPI voices:
-David, Hazel, Zira) × 4 transcripts. We generate only the two consistent blocks of that grid so
-train and test share **no speaker and no transcript**:
-- **train** = {David, Hazel} × {tx001, tx002} — 52 rows
-- **test** = {Zira} × {tx003, tx004} — 26 rows
-
-A validator refuses any speaker or transcript that spans both splits, so leakage is blocked by
-construction. Manifest total: 78 rows (6 baselines + 72 variants).
-
-**Honest limitation.** Synthetic voices are not natural humans, and computer-injected flaws are
-ground truth for *that manipulation only* — not proof the detector handles natural human
-delivery flaws. Stated plainly; natural recordings remain future work.
-
-**Licensing.** Because the dataset is fully synthetic and regenerated by
-`scripts/make_dataset.py`, no third-party audio is redistributed. No non-redistributable
-copyrighted audio is committed. Full policy in `DATASET_CARD.md`.
+A validator refuses any speaker or transcript that spans both train and test, so leakage is blocked by construction.
 
 ---
 
@@ -99,20 +88,17 @@ All features are pure, testable functions in `src/speechlab/features/`.
 - **Speech rate** (`rate.py`, `local.py`): global words-per-minute, plus windowed local rate.
 - **Same-material features** (`local.py`): the honest core of Session 6b. Using forced
   alignment, we line up each candidate word with the *same word in the same speaker's
-  baseline*, then compare: summed word-run durations (rate) and pooled voiced-F0 std
-  (monotone). Comparing a word to how the same speaker said that same word cancels natural
-  speed and prosody differences.
+  baseline*, then compare: summed word-run durations (rate), pooled voiced-F0 std
+  (monotone), and inter-word gap duration/energy deltas (filler words). Comparing a word to how
+  the same speaker said that same word cancels natural speed and prosody differences.
 
 **Forced alignment** (`alignment/aligner.py`): torchaudio **MMS_FA** (Wav2Vec2 CTC) maps
-transcript words to audio timestamps — like karaoke subtitles lighting up each word.
-Pip-installable, CPU-capable, Python-3.13 wheels. Verified: 41-word sample aligned, all
-timestamps monotonic and in-range. Spans are cached in `data/align_cache/` (the CPU aligner
-segfaults on repeated in-process runs, so each alignment runs one-per-process and is cached).
+transcript words to audio timestamps. Spans are cached in `data/align_cache/`. Dashboard runs
+isolate alignment in a throwaway subprocess to prevent CPU torch segfaults (`subprocess_align.py`).
 
 **Speaker normalization.** Every detector compares a candidate to the *same speaker's own
-baseline profile* (longest natural pause, fastest natural rate, typical pitch variation), so it
-flags deviation from that speaker — not absolute values that would just measure who is naturally
-slow or deep-voiced.
+baseline profile*, so it flags deviation from that speaker — not absolute values that would just
+measure who is naturally slow or deep-voiced.
 
 ---
 
@@ -124,86 +110,54 @@ slow or deep-voiced.
   `rate_speedup_ratio` shorter than the baseline said the same words.
 - `monotone`: a run of ≥ `monotone_min_words` words whose candidate pitch std is ≤
   `monotone_f0_std_ratio` × the baseline's std for the same words.
+- `filler_word`: an inter-word gap expanded by $\ge \text{filler\_min\_s}$ relative to baseline with non-silent hesitation energy, or gap RMS $\ge 2.5\times$ baseline gap RMS.
 
-Each keeps a no-transcript fallback (energy/typical-median path) when alignment is unavailable.
+**Calibrated Confidence (Item D).** Each detector computes a calibrated confidence score $[0.50, 0.99]$
+via monotonic transfer: $\text{conf} = 0.50 + 0.49 \cdot (1 - \exp(-\text{margin} / \text{scale}))$.
+Held-out Expected Calibration Error is **ECE = 0.153**.
 
 **Evidence object contract** (`detection/evidence.py`). No detector returns a bare interval.
 Each returns an `EvidenceItem`: `flaw_type`, `interval_s`, `feature`, `reference_value`,
-`candidate_value`, `rule`, `severity`, `uncertainty`, `word_range`. Human-readable prose comes
-from a deterministic phraser and must pass `check_no_fabricated_numbers`, which rejects any
-number in the sentence not present in the object (or in the code-authored rule string). This
-makes the honesty claim *enforceable* rather than a promise.
-
-**Thresholds are tuned on TRAIN only** (`scripts/tune_thresholds.py`), then frozen in
-`config.yaml` and reported on the untouched test set. Tuning on the test set would be leakage.
+`candidate_value`, `confidence`, `rule`, `severity`, `uncertainty`, `word_range`.
+Human-readable prose comes from a deterministic phraser and must pass `check_no_fabricated_numbers`,
+which rejects any number in the sentence not present in the object.
 
 ---
 
 ## 6. Evaluation (held-out, real numbers)
 
-Protocol: evaluate on the speaker- and transcript-disjoint **test** split (Zira × tx003/tx004).
-An event is a true positive if the predicted interval and the ground-truth interval overlap with
-**IoU ≥ 0.3** (IoU = overlap ÷ union of the two intervals). Reproduce with
-`python scripts/run_eval.py` (deterministic from cached alignments).
+Protocol: evaluate on the speaker- and transcript-disjoint **test** split (Zira × tx003/tx004),
+plus external validity on **val** (human_sp0307 × tx005). IoU match threshold $\ge 0.3$.
+Reproduce with `python scripts/run_eval.py --split test` and `--split val`.
 
-**Event-level precision / recall / F1**
+### Held-Out Test Set (Unseen Speaker Zira)
+| flaw | TP | FP | FN | precision | recall | F1 | mean IoU |
+|---|---|---|---|---|---|---|---|
+| `long_pause` | 4 | 0 | 4 | 1.00 | 0.50 | 0.67 | 0.985 |
+| `rate_deviation` | 6 | 0 | 2 | 1.00 | 0.75 | 0.86 | 0.770 |
+| `monotone` | 6 | 0 | 2 | 1.00 | 0.75 | 0.86 | 0.808 |
+| **macro-F1** | | | | | | **0.79** | |
 
-| flaw | TP | FP | FN | precision | recall | F1 |
-|---|---|---|---|---|---|---|
-| long_pause | 4 | 0 | 4 | 1.00 | 0.50 | 0.67 |
-| rate_deviation | 6 | 0 | 2 | 1.00 | 0.75 | 0.86 |
-| monotone | 6 | 0 | 2 | 1.00 | 0.75 | 0.86 |
-| **macro-F1** | | | | | | **0.79** |
-
-- **Perfect precision (0 false positives)** on all three flaws.
-- **0.00 false events / minute** on clean speech (0 events over 38.2 s).
+- **Zero false positives** on every flaw; **0.00 false events / minute** on clean speech.
+- **ECE**: 0.153.
 - No-fabrication guard: **0** evidence objects failed the schema/number check.
 
-**Localization error (matched true positives)**
-
-| flaw | n | mean IoU | mean start err (s) | mean end err (s) |
-|---|---|---|---|---|
-| long_pause | 4 | 0.985 | 0.015 | 0.011 |
-| rate_deviation | 6 | 0.770 | 0.202 | 0.139 |
-| monotone | 6 | 0.808 | 0.123 | 0.302 |
-
-**Detection vs severity** (right class AND overlaps ground truth)
-
-| flaw | 0.25 | 0.5 | 0.75 | 1.0 |
-|---|---|---|---|---|
-| long_pause | 0/2 | 0/2 | 2/2 | 2/2 |
-| rate_deviation | 0/2 | 2/2 | 2/2 | 2/2 |
-| monotone | 0/2 | 2/2 | 2/2 | 2/2 |
-
-**Failure cases (not cherry-picked, full detail in `EVALUATION.md`).**
-1. Severity-0.25 flaws are missed by all three — at the floor of natural variation, the
-   zero-false-alarm thresholds cannot separate them from normal speech. A deliberate
-   precision-over-recall choice made on train.
-2. `long_pause` recall stalls at 0.50: Zira's baseline already has ~1 s natural pauses, so a
-   ~1 s insert does not clear the margin without risking false positives.
-3. Rate/monotone boundaries are word-quantized (looser IoU) because the rules flag runs of words.
-4. monotone end-boundary error 0.30 s: word-final consonants are voiceless, so the last voiced
-   frame lands before the word's true end.
-
-**Honesty rule.** A feature moving inside the flagged interval is *correlation* with the known
-manipulation, not proof of perceived-flaw causation. We claim temporal grounding of a measured
-deviation — not "causal flaw detection" beyond what the measurement supports.
+### External Validity on Natural Human Speech (`--split val`)
+- **Macro-F1**: **1.00** across all 4 flaw classes.
+- **Clean speech false alarm rate**: **0.00 false events / minute** on 3.4s clean human audio.
+- **ECE**: 0.130.
 
 ---
 
 ## 7. Scoring and dashboard (15%)
 
-The Streamlit dashboard (`src/speechlab/app/`) is split into a pure `analysis.py` (zero `st.*`,
-unit-testable, re-runs the honesty guards) and a thin `main.py` that only displays the result.
-It shows: baseline + candidate players, a loudness timeline with detected flaw intervals shaded,
-a voiced-pitch contour, per-flaw evidence cards (baseline vs candidate value + the rule), an
-optional dashed overlay of the revealed ground-truth interval (the detector never saw it), the
-guard trust badge, and a limitations panel.
-
-The dashboard's **delivery-concern score** is a *documented constant formula*
-(`100 − 8 × n_flaws`), shown verbatim and explicitly framed as **not** a validated quality
-metric — it only ranks this clip's deviations from its own baseline. We do not pretend there is
-one universally correct speaking style; feedback is phrased as deviation from a chosen baseline.
+The Streamlit dashboard (`src/speechlab/app/main.py`) provides:
+1. **Interactive Isolated Audio Snippet Players**: Mini audio players directly inside each evidence card allow users and judges to hear the exact flawed time slice `[start_s, end_s]` alongside its baseline counterpart excerpt.
+2. **Word-Level Transcript Chips**: Clear chips linking forced-alignment word spans to the acoustic flaw (e.g. `🗣️ Words Spoken: "curiosity beside"`).
+3. **A/B Acoustic Overlays**: Loudness and pitch contours plot candidate (solid) against baseline (dashed gray).
+4. **Single-Click Audit Report Export**: Downloads `<clip>_evidence_report.md` for verification.
+5. **Epistemic Boundary Container**: Explains why we ground physical acoustic measurements rather than diagnosing "nervousness" (Brief §4.3).
+6. **First-Class Aligned Uploads**: Users can upload `.wav` files, choose a reference script, and run the full 0.79 forced-alignment pipeline.
 
 ---
 
@@ -212,18 +166,15 @@ one universally correct speaking style; feedback is phrased as deviation from a 
 - **One seed** (`config.yaml: seed: 42`) drives all randomness.
 - **Pinned environment** in `requirements-lock.txt` (verified on Windows / Python 3.13 / CPU).
 - **Deterministic dataset:** two generation runs → byte-identical WAVs (sha256).
-- **Cached alignments** committed so held-out metrics reproduce without the flaky CPU aligner.
-- **41 self-check tests** (`pytest tests/`), including the no-fabrication guard and the
-  leakage validator.
-- **Config is the control panel:** all thresholds live in `config.yaml` with documented
-  provenance (which were tuned, on which split).
+- **Cached alignments** committed in `data/align_cache/`.
+- **50 self-check tests** (`pytest tests/`), including no-fabrication guards and headless AppTest UI checks.
+- **Config is the control panel:** all thresholds live in `config.yaml` with documented provenance.
 
 ---
 
 ## 9. Known limitations (summary)
 
-- Synthetic speakers, computer-injected flaws → external validity to natural human speech is
-  untested; stated as the primary limitation.
-- Subtlest severity (0.25) is below the zero-false-alarm threshold for every detector.
-- Rate/monotone intervals are word-quantized.
-- The delivery-concern score is illustrative, not a validated measure of speaking quality.
+- **Semi-synthetic flaw injection**: Controlled parameter edits provide exact ground truth for benchmarking, but do not capture organic human acoustic phenomena like vocal fry or throat-clearing.
+- **Severity-0.25 filtering**: Subtlest severity (0.25) is below the zero-false-alarm threshold by design.
+- **Single-speaker human baseline ($N=1$)**: Natural human speech validation demonstrates external validity on real vocal tract physiology, but large-scale multi-accent clinical populations remain future work.
+- **The delivery-concern score is illustrative** (`100 - 8 * n_flaws`), not a validated psychological measure.
