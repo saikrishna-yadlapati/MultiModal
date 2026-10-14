@@ -8,7 +8,7 @@ number spoken is produced by `scripts/run_eval.py` — do not round or embellish
 **Before recording (setup, off-camera):**
 ```bash
 .venv\Scripts\activate
-python -m pytest tests/ -q          # confirm 41 passed
+python -m pytest tests/ -q          # confirm 50 passed
 python scripts/make_dataset.py      # confirm dataset present (Windows/SAPI)
 streamlit run src/speechlab/app/main.py   # leave running in a browser tab
 ```
