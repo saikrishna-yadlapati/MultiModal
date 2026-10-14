@@ -551,6 +551,18 @@ At the point this context was created (2026-10-09):
 - **Tests: 50 passed** (all 9 dashboard tests including headless AppTest pass cleanly).
 - **Held-out benchmarks**: Strictly preserved at **Macro-F1 0.79** and 0.00 false alarms/min.
 
+### Update 2026-10-14 (Session 8g — Rich Multimodal Graphics, Interactivity & Markdown Cleanup)
+- **Interactive UI & Visual Additions (`src/speechlab/app/visuals.py` & `src/speechlab/app/main.py`):**
+  1. **Acoustic Spectrogram Heatmap**: High-contrast, calibrated frequency spectrogram ($0 - 4000\text{ Hz}$) generated via `scipy.signal.spectrogram` with a 5-step perceptually graded twilight-to-gold palette, overlaid with detected flaw bounding intervals and frequency scale ticks. Enables visual inspection of acoustic harmonics, formant shifts, and silence drops.
+  2. **Contrastive Acoustic Radar Profile (SVG)**: 4-dimensional spider/radar graphic comparing Candidate delivery vs Speaker Baseline across Pause Naturalness, Pitch Dynamism, Pacing Stability, and Fluency & Flow, with dynamic delivery health bars.
+  3. **Interactive Multi-Track Acoustic Explorer**: Tabbed view allowing exploration of (1) Loudness & Flaw Intervals with hover tooltips and zoom/pan, (2) Acoustic Spectrogram Heatmap, and (3) Pitch (Voiced F0) contour with mean pitch guidelines and monotone flattening bands.
+  4. **Interactive Flaw Drill-down Inspector**: Dropdown selector to isolate and focus on individual flaws, complete with side-by-side **Acoustic Delta Gauges** (comparing candidate measurement vs baseline normal with percentage deviations) and isolated audio snippet playback.
+  5. **Interactive Word Alignment Ribbon**: Visual timeline of spoken words with color-coded warning pills (`⚠️`) on words intersecting detected flaw intervals.
+  6. **Sidebar Flaw Filter**: Instant filtering of candidate dataset clips by flaw type (`long_pause`, `rate_deviation`, `monotone`, `filler_word`).
+- **Markdown Cleanup**: Removed redundant scratch prompt files (`NEW_CHAT_HANDOFF.md`, `README_CONTEXT_PACKAGE.md`, `docs/NEW_CHAT_PROMPT.md`), retaining only authoritative architecture, dataset, evaluation, decisions, and system agent documentation.
+- **Verification**: All 50 pytest tests pass cleanly; headless AppTest verified; held-out evaluation preserved at **Macro-F1 0.79**, 0.00 false alarms/min, and ECE 0.153.
+
+
 
 
 

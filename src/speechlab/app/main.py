@@ -1,9 +1,10 @@
-"""Interactive dashboard (Session 5). Thin UI over src/speechlab logic.
+"""Interactive dashboard (Session 5 & Track C polish). Thin UI over src/speechlab logic.
 
 Run:  streamlit run src/speechlab/app/main.py
 
 This script only *arranges* and *displays*. Every number it shows comes from
-speechlab.app.analysis (which wraps the Session 1-4 measurement + detection code).
+speechlab.app.analysis (which wraps the Session 1-4 measurement + detection code)
+or speechlab.app.visuals (which generates spectrograms, radar charts, and interactive plots).
 It adds no measurement of its own — the honesty contract (numbers come from code,
 never prose) holds right up to the screen, and a trust badge shows the guard result.
 """
@@ -28,6 +29,16 @@ from speechlab.config import load_config  # noqa: E402
 from speechlab.dataset.manifest import read_manifest  # noqa: E402
 from speechlab.app.analysis import analyze, load_audio  # noqa: E402
 from speechlab.alignment.subprocess_align import spans_for  # noqa: E402
+from speechlab.app.visuals import (  # noqa: E402
+    FLAW_COLORS,
+    compute_radar_metrics,
+    enhanced_pitch_chart,
+    enhanced_timeline_chart,
+    generate_radar_svg,
+    generate_spectrogram_image,
+    render_acoustic_delta_bar,
+    render_word_ribbon,
+)
 
 
 def audio_slice_bytes(y: np.ndarray, sr: int, start_s: float, end_s: float, pad_s: float = 0.05) -> bytes:
@@ -62,11 +73,61 @@ def get_affected_words(spans, start_s: float, end_s: float) -> str | None:
         return f"(before '{w_after}')"
     return None
 
-FLAW_COLORS = {"long_pause": "#e4572e", "rate_deviation": "#f3a712",
-               "monotone": "#4c6ef5", "filler_word": "#20c997"}
+
 ALIGN_CACHE = ROOT / "data" / "align_cache"
 
-st.set_page_config(page_title="Speech flaw grounding", layout="wide")
+st.set_page_config(
+    page_title="Speech Flaw Grounding & Acoustic Coaching",
+    page_icon="🎙️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Custom high-end CSS for hackathon presentation polish
+st.markdown(
+    """
+    <style>
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        font-size: 1.85rem !important;
+        font-weight: 700 !important;
+        color: #1e293b !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        color: #64748b !important;
+    }
+    /* Clean card containers */
+    .stContainer {
+        border-radius: 10px;
+    }
+    /* Flaw category pill */
+    .flaw-pill {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-right: 8px;
+    }
+    /* Top badge */
+    .track-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -81,27 +142,23 @@ def _manifest(path: str):
 
 @st.cache_data(show_spinner="Aligning…")
 def _spans(sample_id: str | None, audio_path: str | None, transcript: str | None):
-    """Forced-alignment spans for one clip (cache-first, subprocess on miss), or None.
-
-    None whenever we have no transcript (an upload) or alignment is unavailable — the
-    detectors then use their Session 4 fallbacks. Cached by sample_id so a Streamlit
-    rerun is a dict hit, not a re-align.
-    """
+    """Forced-alignment spans for one clip (cache-first, subprocess on miss), or None."""
     if not sample_id or not transcript:
         return None
     return spans_for(sample_id, audio_path or "", transcript, ALIGN_CACHE)
 
 
 @st.cache_data(show_spinner="Analyzing clip…")
-def _run(baseline_path: str, cand_path: str | None, cand_bytes: bytes | None,
-         base_id: str | None, base_tx: str | None,
-         cand_id: str | None, cand_tx: str | None) -> dict:
-    """Cached end-to-end analysis. Keyed by baseline + candidate + their clip ids.
-
-    Resolves forced-alignment spans for the baseline and candidate (dataset clips have
-    both -> same-material detectors, matching run_eval.py's 0.79 path). Uploads have no
-    transcript -> spans stay None -> the honest Session 4 fallback runs.
-    """
+def _run(
+    baseline_path: str,
+    cand_path: str | None,
+    cand_bytes: bytes | None,
+    base_id: str | None,
+    base_tx: str | None,
+    cand_id: str | None,
+    cand_tx: str | None,
+) -> dict:
+    """Cached end-to-end analysis. Keyed by baseline + candidate + their clip ids."""
     cfg = _config()
     by, bsr = load_audio(baseline_path)
     cy, csr = load_audio(cand_bytes) if cand_bytes is not None else load_audio(cand_path)
@@ -111,62 +168,19 @@ def _run(baseline_path: str, cand_path: str | None, cand_bytes: bytes | None,
 
 
 def timeline_chart(rms_df, evidence_df, duration_s, gt=None, base_rms_df=None):
-    """Energy envelope with detected flaw intervals shaded; optional A/B baseline overlay.
-
-    Layered Altair chart: candidate loudness (solid) vs baseline reference (dashed gray),
-    with detected flaw intervals shaded.
-    """
-    x = alt.X("time_s:Q", title="Time (seconds)",
-              scale=alt.Scale(domain=[0, duration_s], nice=False))
-    layers = []
-    if base_rms_df is not None and not base_rms_df.empty:
-        base_line = alt.Chart(base_rms_df).mark_line(
-            color="#adb5bd", strokeDash=[4, 4], strokeWidth=1.5
-        ).encode(x=x, y=alt.Y("rms_norm:Q", title="Loudness (0–1)"))
-        layers.append(base_line)
-
-    cand_line = alt.Chart(rms_df).mark_line(color="#212529", strokeWidth=2).encode(
-        x=x, y=alt.Y("rms_norm:Q", title="Loudness (0–1)"))
-    layers.append(cand_line)
-
-    if not evidence_df.empty:
-        bands = alt.Chart(evidence_df).mark_rect(opacity=0.28).encode(
-            x="start_s:Q", x2="end_s:Q",
-            color=alt.Color("flaw_type:N", title="Detected flaw",
-                            scale=alt.Scale(domain=list(FLAW_COLORS),
-                                            range=list(FLAW_COLORS.values()))))
-        layers.insert(0, bands)
-    if gt is not None:
-        gt_df = alt.Chart(
-            pd.DataFrame({"s": [gt[0]], "e": [gt[1]]})
-        ).mark_rect(opacity=0.0, stroke="#000", strokeWidth=2, strokeDash=[6, 3]).encode(
-            x="s:Q", x2="e:Q")
-        layers.append(gt_df)
-    return alt.layer(*layers).properties(height=240)
+    """Energy envelope with detected flaw intervals shaded; optional A/B baseline overlay."""
+    return enhanced_timeline_chart(rms_df, evidence_df, duration_s, gt, base_rms_df)
 
 
 def pitch_chart(cand_f0, duration_s, base_f0=None):
     """A/B overlaid pitch contour (voiced frames): candidate vs speaker's baseline."""
-    x = alt.X("time_s:Q", title="Time (seconds)",
-              scale=alt.Scale(domain=[0, duration_s], nice=False))
-    layers = []
-    if base_f0 is not None and not base_f0.empty:
-        base_line = alt.Chart(base_f0).mark_line(
-            color="#adb5bd", strokeDash=[4, 4], strokeWidth=1.5
-        ).encode(x=x, y=alt.Y("f0_hz:Q", title="Pitch (Hz)"))
-        layers.append(base_line)
-    if cand_f0 is not None and not cand_f0.empty:
-        cand_line = alt.Chart(cand_f0).mark_line(
-            color="#4c6ef5", strokeWidth=2
-        ).encode(x=x, y=alt.Y("f0_hz:Q", title="Pitch (Hz)"))
-        layers.append(cand_line)
-    return alt.layer(*layers).properties(height=200) if layers else None
+    return enhanced_pitch_chart(cand_f0, duration_s, base_f0)
 
 
 def generate_markdown_report(sample_id, score, score_formula, aligned, ev_df, cand_dur, base_id):
     """Produce a downloadable, timestamped Markdown audit report of all evidence."""
     lines = [
-        f"# Speech Flaw Grounding Audit Report",
+        "# Speech Flaw Grounding Audit Report",
         f"- **Candidate Sample**: `{sample_id}`",
         f"- **Baseline Reference**: `{base_id}`",
         f"- **Clip Duration**: {cand_dur:.2f}s",
@@ -207,7 +221,8 @@ baselines = [r for r in manifest if r.baseline_or_variant == "baseline"]
 variants = [r for r in manifest if r.baseline_or_variant == "variant"]
 
 with st.sidebar:
-    st.header("Source")
+    st.markdown('<div class="track-badge">Track C Audio Studio</div>', unsafe_allow_html=True)
+    st.header("Audio Source")
     if not baselines:
         st.error("No baseline in the manifest. Run scripts/make_dataset.py first.")
         st.stop()
@@ -262,15 +277,25 @@ with st.sidebar:
             base_id_arg = base_row.sample_id
             base_tx_arg = base_row.transcript_text
     else:
-        ids = [r.sample_id for r in variants]
+        # Quick flaw category filter for easy testing
+        flaw_filter = st.selectbox(
+            "Filter clips by flaw:",
+            ["All Flaws", "long_pause", "rate_deviation", "monotone", "filler_word"],
+            help="Quickly find test clips by flaw type"
+        )
+        if flaw_filter != "All Flaws":
+            filtered_variants = [r for r in variants if r.flaw_type == flaw_filter]
+        else:
+            filtered_variants = variants
+
+        ids = [r.sample_id for r in filtered_variants] if filtered_variants else [r.sample_id for r in variants]
         default = next((i for i, s in enumerate(ids) if s.endswith("long_pause_s1")), 0)
         pick = st.selectbox("Candidate clip", ids, index=default)
         cand_row = next(r for r in variants if r.sample_id == pick)
         cand_path, cand_name = str(ROOT / cand_row.audio_path), cand_row.sample_id
-        # Speaker normalization only means something against the SAME speaker's
-        # baseline, so pick the candidate's OWN pair baseline, not just baselines[0].
-        base_row = next((b for b in baselines if b.pair_id == cand_row.pair_id),
-                        baselines[0])
+
+        # Speaker normalization against candidate's OWN pair baseline
+        base_row = next((b for b in baselines if b.pair_id == cand_row.pair_id), baselines[0])
         reveal = st.toggle("Reveal ground truth", value=False,
                            help="Overlay the known injected interval (dashed box).")
         cand_id_arg = cand_row.sample_id
@@ -283,26 +308,37 @@ with st.sidebar:
 
 
 # ---------------------------------------------------------------- main
+st.markdown('<div class="track-badge">Multimodal AI Hackathon 2026 · Track C</div>', unsafe_allow_html=True)
 st.title("Temporal speech-flaw grounding")
-st.caption("Evidence-grounded coaching, not a verdict on talent. Every flaw is a "
-           "measured *deviation from this speaker's own baseline* — not a universal "
-           "rule of 'good speaking'. Numbers come from measurement code, never prose.")
+st.caption(
+    "Evidence-grounded coaching, not a verdict on talent. Every flaw is a "
+    "measured *deviation from this speaker's own baseline* — not a universal "
+    "rule of 'good speaking'. Numbers come from measurement code, never prose."
+)
 
-res = _run(str(ROOT / base_row.audio_path), cand_path, cand_bytes,
-           base_id=base_id_arg,
-           base_tx=base_tx_arg,
-           cand_id=cand_id_arg,
-           cand_tx=cand_tx_arg)
+res = _run(
+    str(ROOT / base_row.audio_path),
+    cand_path,
+    cand_bytes,
+    base_id=base_id_arg,
+    base_tx=base_tx_arg,
+    cand_id=cand_id_arg,
+    cand_tx=cand_tx_arg,
+)
 ev_df = res["evidence_df"]
 flagged_s = float((ev_df["end_s"] - ev_df["start_s"]).sum()) if not ev_df.empty else 0.0
 
+# 4 Core KPI Metrics (Required by automated tests)
 with st.container(horizontal=True):
     st.metric("Candidate length", f"{res['cand_duration_s']:.1f} s", border=True)
     st.metric("Flaw intervals", f"{len(res['evidence'])}", border=True)
     st.metric("Time flagged", f"{flagged_s:.1f} s", border=True)
     st.metric("Delivery-concern score", f"{res['score']}/100", border=True)
-st.caption(f"Score is a transparent rule of thumb (not a validated metric): "
-           f"{res['score_formula']}. It only ranks this clip's detected deviations.")
+
+st.caption(
+    f"Score is a transparent rule of thumb (not a validated metric): "
+    f"{res['score_formula']}. It only ranks this clip's detected deviations."
+)
 
 guard_ok = not res["guard_fabricated"] and not res["guard_schema"]
 if guard_ok:
@@ -312,8 +348,7 @@ else:
     st.error(f"Guard FAILED — fabricated: {res['guard_fabricated']}, "
              f"schema: {res['guard_schema']}", icon=":material/error:")
 
-# Which detectors ran — the thing demo==metrics depends on. Aligned = the same
-# same-material rate/monotone rules that scored held-out macro-F1 0.79 in run_eval.py.
+# Detector status
 if res["aligned"]:
     st.info("Detectors: **forced-alignment same-material** — the exact rate, monotone, & filler "
             "rules evaluated held-out (macro-F1 0.79). Live analysis == measured metrics.",
@@ -324,42 +359,134 @@ else:
                "the aligned same-material path.",
                icon=":material/warning:")
 
+# ---------------------------------------------------------------- Contrastive Acoustic Radar Graphic
+radar_metrics = compute_radar_metrics(res["evidence"], res)
+radar_svg = generate_radar_svg(radar_metrics, width=340, height=270)
+
+with st.container(border=True):
+    c_radar, c_info = st.columns([1, 1.4])
+    with c_radar:
+        st.markdown("**🔬 Contrastive Acoustic Profile** *(Candidate vs Baseline)*")
+        st.markdown(radar_svg, unsafe_allow_html=True)
+        st.caption("Dashed gray = Baseline reference (100%) | Blue polygon = Candidate speech delivery.")
+    with c_info:
+        st.markdown("**📊 Multi-Attribute Delivery Balance**")
+        st.markdown(
+            "Evaluation across the four primary acoustic dimensions of Track C. "
+            "Deviations are normalized against the speaker's own baseline speech profile:"
+        )
+        for dim, val in radar_metrics.items():
+            pct = int(val * 100)
+            status_color = "#2b8a3e" if pct >= 80 else ("#e67700" if pct >= 55 else "#c92a2a")
+            bar_color = FLAW_COLORS.get(
+                "long_pause" if "Pause" in dim else
+                "monotone" if "Pitch" in dim else
+                "rate_deviation" if "Pacing" in dim else "filler_word",
+                "#4c6ef5"
+            )
+            st.markdown(
+                f"""
+                <div style="margin-bottom: 8px;">
+                  <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;">
+                    <span>{dim}</span>
+                    <span style="color: {status_color}; font-weight: 700;">{pct}%</span>
+                  </div>
+                  <div style="background: #e9ecef; border-radius: 4px; height: 7px; width: 100%; overflow: hidden; margin-top: 2px;">
+                    <div style="background: {bar_color}; height: 100%; width: {pct}%;"></div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        st.caption("Lower scores reflect localized acoustic deviations flagged by the blind detectors.")
+
+# Audio Players
 cols = st.columns(2)
 with cols[0]:
     with st.container(border=True):
-        st.markdown("**Baseline (reference)**")
+        st.markdown(f"**🔊 Baseline (reference)**: `{base_row.speaker_id}`")
         st.audio(str(ROOT / base_row.audio_path), alt="Baseline reference recording")
 with cols[1]:
     with st.container(border=True):
-        st.markdown("**Candidate (analyzed)**")
+        st.markdown(f"**🔊 Candidate (analyzed)**: `{cand_name}`")
         st.audio(cand_bytes if cand_bytes is not None else cand_path,
                  alt="Candidate recording under analysis")
 
-
+# Ground truth bounds for overlay
 gt = None
 if reveal and cand_row is not None and cand_row.gt_start_s is not None:
     gt = (cand_row.gt_start_s, cand_row.gt_end_s)
 
+# ---------------------------------------------------------------- Interactive Multi-Track Acoustic Visualizer
 with st.container(border=True):
-    st.subheader("Timeline — loudness with detected flaw intervals")
-    st.altair_chart(
-        timeline_chart(res["cand_rms"], ev_df, res["cand_duration_s"], gt, res.get("base_rms")),
-        alt="Candidate loudness over time with detected flaw intervals shaded and baseline overlay")
-    caption_parts = ["Solid black = candidate loudness | Dashed gray = baseline loudness (same speaker)."]
-    if gt is not None:
-        caption_parts.append("Dashed black box = ground-truth interval.")
-    st.caption(" ".join(caption_parts))
+    st.subheader("Interactive Multi-Track Acoustic Explorer")
+    t_tab1, t_tab2, t_tab3 = st.tabs([
+        "📊 Loudness & Flaw Intervals",
+        "🌈 Acoustic Spectrogram Heatmap",
+        "🎼 Pitch Contour (Voiced F0)",
+    ])
 
-with st.container(border=True):
-    st.subheader("Pitch contour (voiced frames) — A/B contrast")
-    if res["cand_f0"].empty:
-        st.caption("No voiced pitch detected.")
-    else:
-        p_chart = pitch_chart(res["cand_f0"], res["cand_duration_s"], res.get("base_f0"))
-        if p_chart:
-            st.altair_chart(p_chart, alt="Candidate pitch vs baseline pitch in Hz over time")
-            st.caption("Solid blue = candidate pitch | Dashed gray = baseline pitch (same speaker).")
+    with t_tab1:
+        st.altair_chart(
+            enhanced_timeline_chart(res["cand_rms"], ev_df, res["cand_duration_s"], gt, res.get("base_rms")),
+            use_container_width=True,
+        )
+        caption_parts = [
+            "Solid black = candidate loudness | Dashed gray = baseline loudness (same speaker).",
+            "Shaded bands = detected flaw intervals with interactive tooltips.",
+        ]
+        if gt is not None:
+            caption_parts.append("Dashed black box = ground-truth interval.")
+        st.caption(" ".join(caption_parts))
 
+    with t_tab2:
+        # High-resolution spectrogram generated with scipy + twilight-to-gold colormap
+        if res.get("cand_y") is not None and res.get("cand_sr") is not None:
+            spec_bytes = generate_spectrogram_image(
+                res["cand_y"],
+                res["cand_sr"],
+                res["cand_duration_s"],
+                evidence_df=ev_df,
+                max_freq=4000,
+                width=950,
+                height=230,
+            )
+            st.image(
+                spec_bytes,
+                caption="Candidate Audio Spectrogram (0–4000 Hz) with overlaid flaw bounding intervals.",
+                use_container_width=True,
+            )
+            st.caption(
+                "Visual speech energy distribution across frequencies over time. "
+                "Notice silence gaps during pauses, formant compression during rapid pacing, "
+                "and flat harmonic striations during monotone segments."
+            )
+
+    with t_tab3:
+        if res["cand_f0"].empty:
+            st.caption("No voiced pitch detected in this sample.")
+        else:
+            p_chart = enhanced_pitch_chart(
+                res["cand_f0"],
+                res["cand_duration_s"],
+                res.get("base_f0"),
+                evidence_df=ev_df,
+            )
+            if p_chart:
+                st.altair_chart(p_chart, use_container_width=True)
+                st.caption(
+                    "Solid blue = candidate pitch | Dashed gray = baseline pitch (same speaker) | "
+                    "Dotted line = candidate mean pitch | Shaded blue = monotone flattening region."
+                )
+
+# Word-level transcript alignment ribbon (when alignment spans exist)
+cand_spans = res.get("cand_spans")
+if cand_spans:
+    with st.container(border=True):
+        st.markdown(render_word_ribbon(cand_spans, ev_df), unsafe_allow_html=True)
+        st.caption("Forced alignment word boundaries. Words overlapping flagged flaw intervals are highlighted with warnings.")
+
+# ---------------------------------------------------------------- Evidence & Interactive Flaw Inspector
 col_ev, col_dl = st.columns([3, 1])
 with col_ev:
     st.subheader("Evidence")
@@ -379,22 +506,38 @@ if ev_df.empty:
     st.success("No deviations flagged against this speaker's baseline.",
                icon=":material/check_circle:")
 else:
-    for _, r in ev_df.iterrows():
+    # Interactive Flaw Drill-down Inspector
+    flaw_options = ["Show All Flaws"] + [
+        f"#{i+1}: {r.flaw_type.replace('_', ' ').title()} ({r.start_s:.2f}s → {r.end_s:.2f}s)"
+        for i, r in ev_df.iterrows()
+    ]
+    selected_flaw = st.selectbox("Inspect specific flaw interval:", flaw_options, index=0)
+
+    for i, r in ev_df.iterrows():
+        flaw_label = f"#{i+1}: {r.flaw_type.replace('_', ' ').title()} ({r.start_s:.2f}s → {r.end_s:.2f}s)"
+        if selected_flaw != "Show All Flaws" and selected_flaw != flaw_label:
+            continue
+
         with st.container(border=True):
             color = ('red' if r.flaw_type == 'long_pause' else
                      'orange' if r.flaw_type == 'rate_deviation' else
                      'green' if r.flaw_type == 'filler_word' else 'blue')
             conf_str = f"  ·  Confidence: **{r.confidence*100:.0f}%**" if pd.notna(r.confidence) else ""
-            st.markdown(f":{color}[**{r.flaw_type.replace('_',' ')}**]  "
+            st.markdown(f":{color}[**{r.flaw_type.replace('_',' ').title()}**]  "
                         f"`{r.start_s:.2f}s → {r.end_s:.2f}s`{conf_str}")
 
             # Word-level transcript grounding
-            cand_spans = res.get("cand_spans")
             words_str = get_affected_words(cand_spans, r.start_s, r.end_s)
             if words_str:
-                st.markdown(f"🗣️ **Words Spoken:** :violet[**\"{words_str}\"**]")
+                st.markdown(f"🗣️ **Spoken Words / Context:** :violet[**\"{words_str}\"**]")
 
             st.write(r.sentence)
+
+            # Visual Acoustic Comparison Delta Gauge
+            st.markdown(
+                render_acoustic_delta_bar(r.feature, r.candidate_value, r.reference_value, r.flaw_type),
+                unsafe_allow_html=True,
+            )
 
             # Interactive isolated audio snippet player
             if res.get("cand_y") is not None and res.get("cand_sr") is not None:
@@ -454,11 +597,26 @@ with st.expander("📈 Stress-Testing: Detection Rate vs. Flaw Severity Curve"):
         {"flaw": "monotone", "severity": 0.75, "detection_rate": 1.0},
         {"flaw": "monotone", "severity": 1.00, "detection_rate": 1.0},
     ])
-    sweep_chart = alt.Chart(sweep_df).mark_line(point=True).encode(
-        x=alt.X("severity:Q", title="Injected Flaw Severity (0.25 = subtle, 1.00 = extreme)"),
-        y=alt.Y("detection_rate:Q", title="Detection Rate (Empirical Recall)", scale=alt.Scale(domain=[0, 1.05])),
-        color=alt.Color("flaw:N", title="Flaw Type", scale=alt.Scale(domain=list(FLAW_COLORS), range=list(FLAW_COLORS.values())))
-    ).properties(height=220)
+    sweep_chart = (
+        alt.Chart(sweep_df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("severity:Q", title="Injected Flaw Severity (0.25 = subtle, 1.00 = extreme)"),
+            y=alt.Y("detection_rate:Q", title="Detection Rate (Empirical Recall)", scale=alt.Scale(domain=[0, 1.05])),
+            color=alt.Color(
+                "flaw:N",
+                title="Flaw Type",
+                scale=alt.Scale(domain=list(FLAW_COLORS), range=list(FLAW_COLORS.values())),
+            ),
+            tooltip=[
+                alt.Tooltip("flaw:N", title="Flaw Type"),
+                alt.Tooltip("severity:Q", title="Severity"),
+                alt.Tooltip("detection_rate:Q", title="Recall", format=".0%"),
+            ],
+        )
+        .properties(height=230)
+        .interactive()
+    )
     st.altair_chart(sweep_chart, use_container_width=True)
     st.caption("Severity 0.25 is intentionally filtered below threshold to preserve 0.00 false alarms on clean speech.")
 
@@ -475,8 +633,5 @@ with st.expander("Limitations & honest caveats"):
         "- **Subtlest severity (0.25) is missed** by all three detectors (a precision/recall "
         "trade-off chosen on the train split).\n"
         "- **The delivery-concern score is illustrative**, not a validated measure of "
-        "speaking quality — it only counts flagged deviations from this speaker's baseline.")
-
-
-
-
+        "speaking quality — it only counts flagged deviations from this speaker's baseline."
+    )
