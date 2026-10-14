@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from speechlab.dataset.inject import inject_pause  # noqa: E402
 from speechlab.dataset.manifest import read_manifest  # noqa: E402
-from speechlab.dataset.variants import change_rate, flatten_pitch  # noqa: E402
+from speechlab.dataset.variants import change_rate, flatten_pitch, inject_filler  # noqa: E402
 
 SR = 16000
 
@@ -103,3 +103,15 @@ def test_manifest_variants_have_gt_and_params():
         assert r.gt_start_s is not None and r.gt_end_s is not None, r.sample_id
         assert r.gt_end_s > r.gt_start_s, r.sample_id
         assert r.transform_params, r.sample_id
+
+
+def test_inject_filler_inserts_voiced_segment():
+    y = _wobble_tone()
+    ny, gt, params = inject_filler(y, SR, 1.5, 0.4, severity=1.0)
+    assert len(ny) > len(y)
+    assert abs((gt[1] - gt[0]) - 0.4) < 0.01
+    assert params["method"] == "synth_nasal_filler"
+    # The inserted region must be non-zero (voiced)
+    filler_region = ny[int(gt[0] * SR):int(gt[1] * SR)]
+    assert float(np.abs(filler_region).max()) > 0.01
+

@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
 from speechlab.evaluation.metrics import (  # noqa: E402
-    localization_stats, match_events, prf1,
+    calibration_stats, localization_stats, match_events, prf1,
 )
 
 
@@ -43,3 +43,13 @@ def test_prf1_values():
 
 def test_localization_empty_safe():
     assert localization_stats([])["n"] == 0
+
+
+def test_calibration_stats_computation():
+    assert calibration_stats([])["ece"] == 0.0
+    cal = calibration_stats([(0.80, True), (0.80, True)])
+    assert cal["n_total"] == 2
+    assert abs(cal["ece"] - 0.20) < 1e-3
+    assert cal["bins"][1]["count"] == 2
+    assert cal["bins"][1]["accuracy"] == 1.0
+

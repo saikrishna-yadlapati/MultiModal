@@ -99,6 +99,59 @@ def localization_stats(tps: list[tuple[Event, Event, float]]) -> dict:
     }
 
 
+def calibration_stats(scored_preds: list[tuple[float, bool]],
+                      bin_edges: list[float] | None = None) -> dict:
+    """Compute calibration statistics and Expected Calibration Error (ECE).
+
+    Takes:
+      scored_preds : list of (confidence: float, is_tp: bool) for predicted events.
+      bin_edges    : monotonically increasing bin boundaries covering [0.5, 1.0].
+                     Default: [0.50, 0.70, 0.85, 1.001].
+    Returns:
+      dict with:
+        - "n_total": int
+        - "ece": float, Expected Calibration Error (weighted avg of |mean_conf - acc|)
+        - "bins": list of dicts with {
+            "bin_low": float, "bin_high": float, "count": int,
+            "mean_conf": float, "accuracy": float, "abs_gap": float,
+          }
+    """
+    if bin_edges is None:
+        bin_edges = [0.50, 0.70, 0.85, 1.001]
+
+    n_total = len(scored_preds)
+    if n_total == 0:
+        return {"n_total": 0, "ece": 0.0, "bins": []}
+
+    bins = []
+    weighted_gap_sum = 0.0
+
+    for i in range(len(bin_edges) - 1):
+        low, high = bin_edges[i], bin_edges[i + 1]
+        in_bin = [(conf, tp) for conf, tp in scored_preds if low <= conf < high]
+        k = len(in_bin)
+        if k > 0:
+            mean_conf = sum(conf for conf, _ in in_bin) / k
+            acc = sum(1 for _, tp in in_bin if tp) / k
+            gap = abs(mean_conf - acc)
+            weighted_gap_sum += k * gap
+        else:
+            mean_conf, acc, gap = 0.0, 0.0, 0.0
+
+        bins.append({
+            "bin_low": low,
+            "bin_high": min(1.0, high),
+            "count": k,
+            "mean_conf": round(mean_conf, 3),
+            "accuracy": round(acc, 3),
+            "abs_gap": round(gap, 3),
+        })
+
+    ece = weighted_gap_sum / n_total if n_total > 0 else 0.0
+    return {"n_total": n_total, "ece": round(ece, 3), "bins": bins}
+
+
+
 if __name__ == "__main__":
     # Self-check: a perfect hit, a false alarm, and a miss score as expected.
     preds = [("long_pause", (4.0, 6.0)),      # matches gt below (IoU 1.0) -> TP

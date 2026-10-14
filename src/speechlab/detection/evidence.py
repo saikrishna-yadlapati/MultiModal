@@ -18,15 +18,30 @@ from dataclasses import dataclass, field
 @dataclass
 class EvidenceItem:
     """One detected deviation. Field order == docs/ARCHITECTURE.md evidence contract."""
-    flaw_type: str                       # "long_pause" / "rate_deviation" / "monotone"
+    flaw_type: str                       # "long_pause" / "rate_deviation" / "monotone" / "filler_word"
     interval_s: list[float]              # [start, end] in seconds — from code, not prose
     feature: str                         # measured quantity, e.g. "pause_duration_s"
     reference_value: float               # measured on the baseline (same speaker)
     candidate_value: float               # measured on the candidate
     rule: str                            # the comparison that fired (human-readable)
     severity: float | None = None        # 0..1 if the rule yields one, else None
+    confidence: float | None = None      # 0..1 calibrated confidence score (Item D)
     uncertainty: str = ""                # why confidence is limited (always honest)
     word_range: list[int] | None = None  # affected word indices, when alignment is used
+
+
+def compute_confidence(margin: float, scale: float) -> float:
+    """Defensible acoustic confidence: saturating transfer from margin above threshold.
+
+    Returns a score in [0.50, 0.99] rounded to 2 decimals.
+    At margin=0 (boundary), returns 0.50 (minimum detection confidence).
+    As margin grows relative to scale, confidence asymptotically approaches 1.0.
+    """
+    if scale <= 0:
+        return 0.50
+    delta = max(0.0, float(margin)) / float(scale)
+    conf = 1.0 - 0.50 / (1.0 + delta)
+    return round(min(0.99, max(0.50, conf)), 2)
 
 
 def _fmt(x: float) -> str:
@@ -37,7 +52,7 @@ def _fmt(x: float) -> str:
 def validate_evidence(e: EvidenceItem) -> list[str]:
     """Return a list of structural problems (empty == valid). Does not raise."""
     p: list[str] = []
-    if e.flaw_type not in {"long_pause", "rate_deviation", "monotone"}:
+    if e.flaw_type not in {"long_pause", "rate_deviation", "monotone", "filler_word"}:
         p.append(f"bad flaw_type {e.flaw_type!r}")
     if (not isinstance(e.interval_s, (list, tuple)) or len(e.interval_s) != 2):
         p.append("interval_s must be [start, end]")
@@ -55,6 +70,8 @@ def validate_evidence(e: EvidenceItem) -> list[str]:
         p.append("uncertainty is empty (must state why confidence is limited)")
     if e.severity is not None and not (0.0 <= e.severity <= 1.0):
         p.append("severity out of [0,1]")
+    if e.confidence is not None and not (0.0 <= e.confidence <= 1.0):
+        p.append("confidence out of [0,1]")
     return p
 
 
@@ -71,6 +88,8 @@ def _allowed_numbers(e: EvidenceItem) -> set[str]:
     vals = [e.interval_s[0], e.interval_s[1], e.reference_value, e.candidate_value]
     if e.severity is not None:
         vals.append(e.severity)
+    if e.confidence is not None:
+        vals.append(e.confidence)
     if e.word_range is not None:
         vals.extend(e.word_range)
     out = set()
@@ -102,7 +121,8 @@ def phrase_evidence(e: EvidenceItem) -> str:
     s, en = _fmt(e.interval_s[0]), _fmt(e.interval_s[1])
     cand, ref = _fmt(e.candidate_value), _fmt(e.reference_value)
     sev = "" if e.severity is None else f" (severity {_fmt(e.severity)})"
-    return (f"Possible {label} from {s}s to {en}s{sev}: {e.feature} measured {cand} "
+    conf = "" if e.confidence is None else f" [confidence {_fmt(e.confidence)}]"
+    return (f"Possible {label} from {s}s to {en}s{sev}{conf}: {e.feature} measured {cand} "
             f"versus a baseline of {ref} for this speaker ({e.rule}). {e.uncertainty}")
 
 

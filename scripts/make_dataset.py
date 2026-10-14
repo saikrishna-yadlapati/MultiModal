@@ -35,7 +35,7 @@ from speechlab.dataset.manifest import (  # noqa: E402
     ManifestRow, make_pair_id, make_sample_id, validate_manifest, write_manifest,
 )
 from speechlab.dataset.plan import TRANSCRIPTS, VOICES, planned_pairs  # noqa: E402
-from speechlab.dataset.variants import change_rate, flatten_pitch  # noqa: E402
+from speechlab.dataset.variants import change_rate, flatten_pitch, inject_filler  # noqa: E402
 
 LICENSE = "self-generated (Windows SAPI TTS); team-owned, redistributable"
 
@@ -91,6 +91,12 @@ def _sweep(y, sr, dur, cfg, rng):
         ny, gt, params = flatten_pitch(y, sr, mono_start, mono_start + seg, k,
                                        feat["f0_min_hz"], feat["f0_max_hz"])
         specs.append(("monotone", sev, ny, gt, "psola_pitch_flatten", params))
+    if "filler_word" in v:
+        filler_at = _pick(rng, lo, hi_pt)
+        for sev in v["filler_word"]["severities"]:
+            filler_s = round(sev * v["filler_word"]["filler_s_at_sev1"], 3)
+            ny, gt, params = inject_filler(y, sr, filler_at, filler_s, severity=sev)
+            specs.append(("filler_word", sev, ny, gt, "synth_nasal_filler", params))
     return specs
 
 

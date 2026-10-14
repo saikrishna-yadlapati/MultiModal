@@ -481,9 +481,27 @@ At the point this context was created (2026-10-09):
 - Honest gaps unchanged: synthetic speakers + injected flaws; subtlest severity 0.25 still
   missed; uploads (no transcript) cannot use the same-material path by construction.
 
+### Update 2026-10-14 (Session 8 — 4th flaw class: filler-word detection & contract integration)
+- **Feature added:** Implemented 4th flaw class (`filler_word`) spanning dataset variant generation,
+  evidence validation, and alignment-grounded acoustic detection:
+  - `inject_filler` in `src/speechlab/dataset/variants.py`: synthesizes nasal harmonic filler tone with raised cosine envelope, scaled to local energy context.
+  - `build_reference` in `src/speechlab/detection/detectors.py`: measures speaker baseline mean inter-word gap RMS.
+  - `detect_filler_word`: detects voiced energy anomalies in inter-word gaps relative to speaker's baseline gap RMS. Honest fallback returns empty when alignment is absent.
+  - Integrated into `config.yaml`, `manifest.py` schema, `evidence.py` validator, and `main.py` UI color map (`#20c997`).
+  - `scripts/run_eval.py` dynamically evaluates active flaw classes, preserving verified 0.79 macro-F1 on test set.
+- Verification: `run_eval.py` produces macro-F1 0.79, 0.00 false alarms/min on clean speech, 0 evidence guard failures.
+
+### Update 2026-10-14 (Session 8b — Item D: Defensible confidence scoring & calibration evaluation)
+- **Feature added:** Implemented formal confidence scoring and empirical calibration analysis:
+  - `compute_confidence(margin, scale)` in `src/speechlab/detection/evidence.py`: monotonic, saturating transfer function mapping acoustic deviation margin above threshold to $[0.50, 0.99]$.
+  - Added `confidence: float | None` to `EvidenceItem`, validated within $[0, 1]$, and protected by `check_no_fabricated_numbers`.
+  - Wired into all 4 detectors (`detect_long_pause`, `detect_rate_deviation`, `detect_monotone`, `detect_filler_word`).
+  - Added `calibration_stats` in `src/speechlab/evaluation/metrics.py` computing Expected Calibration Error (ECE) and binned accuracy.
+  - Surface calibrated confidence in Streamlit dashboard (`main.py` & `analysis.py`) evidence cards and tables.
+  - Evaluation harness `run_eval.py` reports held-out confidence calibration table: **ECE = 0.153** across 16 test predictions with 0 false alarms.
+- **Tests: 48 passed** (46 prior + 2 new: `test_calibration_stats_computation` in `test_metrics.py` and `test_confidence_bounds_and_transfer_math` in `test_evidence.py`).
 
 
-## 14. OFFICIAL AND TECHNICAL LINKS
 
 - Event: https://multimodal-ai-hackathon-2026-7.devpost.com/
 - Rules: https://multimodal-ai-hackathon-2026-7.devpost.com/rules

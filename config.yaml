@@ -36,6 +36,9 @@ variants:
   monotone:
     severities: [0.25, 0.5, 0.75, 1.0]
     # flatten factor k = 1 - severity (k=0 at sev 1.0 => fully monotone; k=1 => unchanged)
+  filler_word:
+    severities: [0.25, 0.5, 0.75, 1.0]
+    filler_s_at_sev1: 0.5       # severity 1.0 => insert a filler this long (linear with severity)
 
 # Placeholder detection thresholds — TO BE TUNED on train split, verified on held-out.
 # All three detectors are SPEAKER-NORMALIZED: they compare the candidate to the same
@@ -61,6 +64,10 @@ detection:
   monotone_min_words: 3        # word-window width / smallest monotone run flagged
   monotone_window_s: 1.0       # (fallback, no-transcript path) sliding-window length
   monotone_hop_s: 0.25         # (fallback) how far that window steps each reading
+  # Filler-word detection (Session 8 — gap-energy comparison with alignment):
+  filler_min_duration_s: 0.15  # minimum gap between words to consider a filler (seconds)
+  filler_energy_ratio: 2.5     # flag a gap whose RMS is >= this multiple of the baseline's
+                               # mean inter-word gap RMS. Higher = fewer false alarms.
 
 evaluation:
   iou_match_threshold: 0.3   # predicted/true interval overlap to count as a hit

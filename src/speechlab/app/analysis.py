@@ -90,12 +90,13 @@ def evidence_to_frame(items: list[EvidenceItem]) -> pd.DataFrame:
             "feature": e.feature,
             "reference_value": float(e.reference_value),
             "candidate_value": float(e.candidate_value),
+            "confidence": float(e.confidence) if e.confidence is not None else None,
             "rule": e.rule,
             "uncertainty": e.uncertainty,
             "sentence": phrase_evidence(e),
         })
     cols = ["flaw_type", "start_s", "end_s", "feature", "reference_value",
-            "candidate_value", "rule", "uncertainty", "sentence"]
+            "candidate_value", "confidence", "rule", "uncertainty", "sentence"]
     return pd.DataFrame(rows, columns=cols)
 
 

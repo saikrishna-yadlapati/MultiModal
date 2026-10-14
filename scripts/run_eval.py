@@ -34,10 +34,10 @@ from speechlab.detection.evidence import (  # noqa: E402
     check_no_fabricated_numbers, phrase_evidence, validate_evidence,
 )
 from speechlab.evaluation.metrics import (  # noqa: E402
-    localization_stats, match_events, prf1,
+    calibration_stats, localization_stats, match_events, prf1,
 )
 
-FLAWS = ("long_pause", "rate_deviation", "monotone")
+FLAWS = ("long_pause", "rate_deviation", "monotone", "filler_word")
 
 
 def load_wav_mono(path: pathlib.Path):
@@ -72,6 +72,7 @@ def main() -> int:
     sweep = defaultdict(lambda: [0, 0])  # (flaw, sev) -> [detected, total]
     clean_events = 0; clean_seconds = 0.0
     guard_fail = 0
+    scored_preds: list[tuple[float, bool]] = []
 
     for v in sorted(test, key=lambda r: (r.pair_id, r.flaw_type, r.severity or 0)):
         y, sr = load_wav_mono(ROOT / v.audio_path)
@@ -98,6 +99,13 @@ def main() -> int:
             s = sweep[(v.flaw_type, v.severity)]
             s[0] += det; s[1] += 1
 
+        tp_preds = {p for p, _, _ in res.tp}
+        for e in items:
+            pred_key = (e.flaw_type, (e.interval_s[0], e.interval_s[1]))
+            is_tp = pred_key in tp_preds
+            conf = e.confidence if e.confidence is not None else 0.50
+            scored_preds.append((conf, is_tp))
+
         for cls in FLAWS:
             tp[cls] += sum(1 for p, _, _ in res.tp if p[0] == cls)
             fp[cls] += sum(1 for p in res.fp if p[0] == cls)
@@ -108,9 +116,13 @@ def main() -> int:
     print("=== HELD-OUT EVALUATION (test split: unseen speaker + unseen transcripts) ===")
     print(f"thresholds from config.yaml (NOT tuned on this set); IoU match >= {iou_thr}\n")
 
+    report_flaws = [cls for cls in FLAWS if any(r.flaw_type == cls for r in test) or tp[cls] > 0 or fp[cls] > 0]
+    if not report_flaws:
+        report_flaws = list(FLAWS)
+
     print(f"{'flaw':<16}{'TP':>4}{'FP':>4}{'FN':>4}{'prec':>8}{'rec':>8}{'F1':>8}")
     macro = []
-    for cls in FLAWS:
+    for cls in report_flaws:
         p, r, f = prf1(tp[cls], fp[cls], fn[cls])
         macro.append(f)
         print(f"{cls:<16}{tp[cls]:>4}{fp[cls]:>4}{fn[cls]:>4}{p:>8.2f}{r:>8.2f}{f:>8.2f}")
@@ -118,7 +130,7 @@ def main() -> int:
 
     print("\n--- localization error on matched events (true positives) ---")
     print(f"{'flaw':<16}{'n':>4}{'mean IoU':>10}{'start err s':>13}{'end err s':>12}")
-    for cls in FLAWS:
+    for cls in report_flaws:
         L = localization_stats(matched[cls])
         print(f"{cls:<16}{L['n']:>4}{L['mean_iou']:>10.3f}"
               f"{L['mean_start_err_s']:>13.3f}{L['mean_end_err_s']:>12.3f}")
@@ -130,12 +142,23 @@ def main() -> int:
 
     print("\n--- detection rate vs severity (right class AND overlaps GT) ---")
     print(f"{'flaw':<16}" + "".join(f"{s:>8}" for s in (0.25, 0.5, 0.75, 1.0)))
-    for cls in FLAWS:
+    for cls in report_flaws:
         cells = []
         for sev in (0.25, 0.5, 0.75, 1.0):
             det, tot = sweep.get((cls, sev), [0, 0])
             cells.append(f"{det}/{tot}" if tot else "-")
         print(f"{cls:<16}" + "".join(f"{c:>8}" for c in cells))
+
+    cal = calibration_stats(scored_preds)
+    print("\n--- confidence calibration on held-out predictions (Item D) ---")
+    print(f"{'confidence bin':<18}{'count':>8}{'mean conf':>12}{'accuracy':>12}{'abs gap':>12}")
+    for b in cal["bins"]:
+        bin_str = f"[{b['bin_low']:.2f}, {b['bin_high']:.2f})"
+        if b["count"] > 0:
+            print(f"{bin_str:<18}{b['count']:>8}{b['mean_conf']:>12.2f}{b['accuracy']:>12.2f}{b['abs_gap']:>12.2f}")
+        else:
+            print(f"{bin_str:<18}{0:>8}{'-':>12}{'-':>12}{'-':>12}")
+    print(f"ECE (Expected Calibration Error): {cal['ece']:.3f} (lower is better, 0.00 = perfect)")
 
     print(f"\nevidence objects failing schema/number-guard: {guard_fail} (must be 0)")
     return 0 if guard_fail == 0 else 1

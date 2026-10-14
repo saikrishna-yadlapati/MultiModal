@@ -26,7 +26,7 @@ from speechlab.app.analysis import analyze, load_audio  # noqa: E402
 from speechlab.alignment.subprocess_align import spans_for  # noqa: E402
 
 FLAW_COLORS = {"long_pause": "#e4572e", "rate_deviation": "#f3a712",
-               "monotone": "#4c6ef5"}
+               "monotone": "#4c6ef5", "filler_word": "#20c997"}
 ALIGN_CACHE = ROOT / "data" / "align_cache"
 
 st.set_page_config(page_title="Speech flaw grounding", layout="wide")
@@ -227,16 +227,22 @@ if ev_df.empty:
 else:
     for _, r in ev_df.iterrows():
         with st.container(border=True):
-            st.markdown(f":{'red' if r.flaw_type=='long_pause' else 'orange' if r.flaw_type=='rate_deviation' else 'blue'}"
-                        f"[**{r.flaw_type.replace('_',' ')}**]  "
-                        f"`{r.start_s:.2f}s → {r.end_s:.2f}s`")
+            color = ('red' if r.flaw_type == 'long_pause' else
+                     'orange' if r.flaw_type == 'rate_deviation' else
+                     'green' if r.flaw_type == 'filler_word' else 'blue')
+            conf_str = f"  ·  Confidence: **{r.confidence*100:.0f}%**" if pd.notna(r.confidence) else ""
+            st.markdown(f":{color}[**{r.flaw_type.replace('_',' ')}**]  "
+                        f"`{r.start_s:.2f}s → {r.end_s:.2f}s`{conf_str}")
             st.write(r.sentence)
-            st.table({
+            tbl = {
                 ":material/straighten: Feature": r.feature,
                 ":material/person: This speaker's baseline": f"{r.reference_value:g}",
                 ":material/graphic_eq: Candidate measured": f"{r.candidate_value:g}",
                 ":material/rule: Rule that fired": r.rule,
-            })
+            }
+            if pd.notna(r.confidence):
+                tbl[":material/verified: Calibrated confidence"] = f"{r.confidence:.2f} (ECE 0.153)"
+            st.table(tbl)
 
 with st.expander("Limitations & honest caveats"):
     st.markdown(

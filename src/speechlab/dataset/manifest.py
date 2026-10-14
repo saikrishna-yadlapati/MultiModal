@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 # Allowed enum values — kept here so the validator and any generator agree.
-FLAW_TYPES = {"clean", "long_pause", "rate_deviation", "monotone"}
+FLAW_TYPES = {"clean", "long_pause", "rate_deviation", "monotone", "filler_word"}
 ROLES = {"baseline", "variant"}
 SPLITS = {"train", "val", "test"}
 

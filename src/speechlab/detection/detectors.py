@@ -19,15 +19,16 @@ from ..features.local import (
     local_f0_std, local_syllable_rate, same_material_monotone_regions,
     same_material_rate_regions,
 )
-from ..features.pauses import detect_silences
-from .evidence import EvidenceItem
+from ..features.pauses import detect_silences, frame_rms
+from .evidence import EvidenceItem, compute_confidence
 
 
 def build_reference(y: np.ndarray, sr: int, cfg: dict, spans=None) -> dict:
     """Measure the baseline once; these numbers are every detector's 'normal'.
 
     Returns a dict with: longest natural pause, fastest natural local rate, the typical
-    (median) local pitch variability, and which rate method was used. All speaker-specific.
+    (median) local pitch variability, the mean inter-word gap RMS (for filler detection),
+    and which rate method was used. All speaker-specific.
 
     `spans` (optional): the baseline's forced-alignment word spans. When given, the
     rate detector works same-material (candidate words vs the SAME baseline words), so the
@@ -50,10 +51,29 @@ def build_reference(y: np.ndarray, sr: int, cfg: dict, spans=None) -> dict:
     f0_win = local_f0_std(times, f0, d["monotone_window_s"], d["monotone_hop_s"])
     typical_f0_std = float(np.median([w["std_hz"] for w in f0_win])) if f0_win else 0.0
 
+    # Mean inter-word gap RMS: the natural energy level between words in this speaker's
+    # baseline. Used by the filler_word detector — a filler has much MORE energy than
+    # a natural breath or lip noise in the gap.
+    mean_gap_rms = 0.0
+    if spans is not None and len(spans) > 1:
+        rms_times, rms_vals = frame_rms(y, sr, f["frame_length_s"], f["hop_length_s"])
+        gap_energies = []
+        for i in range(len(spans) - 1):
+            g_start = spans[i].end_s
+            g_end = spans[i + 1].start_s
+            if g_end - g_start < 0.01:  # skip negligible gaps
+                continue
+            m = (rms_times >= g_start) & (rms_times < g_end)
+            if m.sum() > 0:
+                gap_energies.append(float(rms_vals[m].mean()))
+        if gap_energies:
+            mean_gap_rms = float(np.mean(gap_energies))
+
     return {"longest_pause_s": longest_pause, "max_local_rate_hz": max_rate,
             "baseline_spans": spans,
             "baseline_f0_times": times, "baseline_f0": f0,
-            "typical_local_f0_std_hz": typical_f0_std}
+            "typical_local_f0_std_hz": typical_f0_std,
+            "mean_inter_word_rms": mean_gap_rms}
 
 
 def _merge(windows, gap_s: float = 0.01):
@@ -81,12 +101,15 @@ def detect_long_pause(y, sr, cfg, ref) -> list[EvidenceItem]:
     for s, e in silences:
         dur = e - s
         if dur >= thresh:
+            scale = max(0.1, float(d.get("long_pause_excess_s", 0.3)))
+            conf = compute_confidence(dur - thresh, scale)
             out.append(EvidenceItem(
                 flaw_type="long_pause", interval_s=[round(s, 3), round(e, 3)],
                 feature="pause_duration_s", reference_value=round(base, 3),
                 candidate_value=round(dur, 3),
                 rule=(f"pause {dur:.2f}s exceeds this speaker's longest natural pause "
                       f"{base:.2f}s by >= {d['long_pause_excess_s']:.2f}s"),
+                confidence=conf,
                 uncertainty=("Pause length only; no forced alignment, so a naturally "
                              "shifted inter-sentence pause could land here.")))
     return out
@@ -112,15 +135,22 @@ def detect_rate_deviation(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
         pct = d["rate_speedup_ratio"] * 100
         out = []
         for r in regions:
+            base_rate = r["base_rate_hz"]
+            cand_rate = r["cand_rate_hz"]
+            speedup = cand_rate / base_rate if base_rate > 0 else 1.0
+            thresh_speedup = d["rate_speedup_ratio"]
+            scale = max(0.1, thresh_speedup - 1.0)
+            conf = compute_confidence(speedup - thresh_speedup, scale)
             out.append(EvidenceItem(
                 flaw_type="rate_deviation",
                 interval_s=[round(r["start_s"], 3), round(r["end_s"], 3)],
                 feature="same_word_local_rate_hz",
-                reference_value=round(r["base_rate_hz"], 2),
-                candidate_value=round(r["cand_rate_hz"], 2),
-                rule=(f"{r['n_words']} words spoken at {r['cand_rate_hz']:.2f}/s vs this "
-                      f"speaker's {r['base_rate_hz']:.2f}/s for the SAME words "
+                reference_value=round(base_rate, 2),
+                candidate_value=round(cand_rate, 2),
+                rule=(f"{r['n_words']} words spoken at {cand_rate:.2f}/s vs this "
+                      f"speaker's {base_rate:.2f}/s for the SAME words "
                       f"(>= {pct:.0f}% faster)"),
+                confidence=conf,
                 uncertainty=("Rate from forced-alignment word durations; alignment can "
                              "smear word boundaries, and the run edges are word-quantized.")))
         return out
@@ -136,12 +166,15 @@ def detect_rate_deviation(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
     out = []
     for s, e in _merge([(a, b) for a, b, _ in hot]):
         peak = max(r for a, b, r in hot if a >= s - 1e-6 and b <= e + 1e-6)
+        scale = max(0.5, base * d["rate_deviation_ratio"])
+        conf = compute_confidence(peak - thresh, scale)
         out.append(EvidenceItem(
             flaw_type="rate_deviation", interval_s=[round(s, 3), round(e, 3)],
             feature="local_syllable_rate_hz", reference_value=round(base, 2),
             candidate_value=round(peak, 2),
             rule=(f"local rate {peak:.2f}/s exceeds this speaker's fastest natural "
                   f"{base:.2f}/s by > {d['rate_deviation_ratio']*100:.0f}%"),
+            confidence=conf,
             uncertainty=unc))
     return out
 
@@ -169,15 +202,23 @@ def detect_monotone(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
             d["monotone_f0_std_ratio"], d["monotone_min_words"])
         out = []
         for r in regions:
+            base_std = r["base_std_hz"]
+            cand_std = r["cand_std_hz"]
+            meas_ratio = cand_std / base_std if base_std > 0 else 0.0
+            thresh_ratio = d["monotone_f0_std_ratio"]
+            margin = max(0.0, thresh_ratio - meas_ratio)
+            scale = max(0.05, thresh_ratio / 2.0)
+            conf = compute_confidence(margin, scale)
             out.append(EvidenceItem(
                 flaw_type="monotone",
                 interval_s=[round(r["start_s"], 3), round(r["end_s"], 3)],
                 feature="same_word_f0_std_hz",
-                reference_value=round(r["base_std_hz"], 2),
-                candidate_value=round(r["cand_std_hz"], 2),
-                rule=(f"{r['n_words']} words with pitch std {r['cand_std_hz']:.2f}Hz vs this "
-                      f"speaker's {r['base_std_hz']:.2f}Hz for the SAME words "
-                      f"(<= {d['monotone_f0_std_ratio']:.2f}x)"),
+                reference_value=round(base_std, 2),
+                candidate_value=round(cand_std, 2),
+                rule=(f"{r['n_words']} words with pitch std {cand_std:.2f}Hz vs this "
+                      f"speaker's {base_std:.2f}Hz for the SAME words "
+                      f"(<= {thresh_ratio:.2f}x)"),
+                confidence=conf,
                 uncertainty=("Pitch std from pooled voiced frames per word run; voiceless "
                              "or short words contribute little, and run edges are word-quantized.")))
         return out
@@ -190,30 +231,112 @@ def detect_monotone(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
     out = []
     for s, e in _merge([(a, b) for a, b, _ in cold]):
         low = min(v for a, b, v in cold if a >= s - 1e-6 and b <= e + 1e-6)
+        margin = max(0.0, thresh - low)
+        scale = max(1.0, thresh / 2.0)
+        conf = compute_confidence(margin, scale)
         out.append(EvidenceItem(
             flaw_type="monotone", interval_s=[round(s, 3), round(e, 3)],
             feature="local_f0_std_hz", reference_value=round(base, 2),
             candidate_value=round(low, 2),
             rule=(f"local pitch std {low:.2f}Hz is below {d['monotone_f0_std_ratio']:.2f}x "
                   f"this speaker's typical {base:.2f}Hz"),
+            confidence=conf,
             uncertainty=("Low pitch variation can be a deliberate style, not a flaw; "
                          "judged only against this speaker's baseline.")))
     return out
 
 
+def detect_filler_word(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
+    """Flag inter-word gaps containing voiced energy — likely filler words ('um'/'uh').
+
+    Filler words are short voiced sounds (nasal hums, hesitation markers) that a
+    speaker inserts between words. They show as VOICED ENERGY in gaps that the
+    transcript does not account for. The forced aligner maps each transcript word
+    to a time range; the spaces between those ranges are inter-word gaps. A gap
+    that is mostly silent is a natural pause (handled by long_pause). A gap that
+    contains substantial voiced energy above the filler RMS threshold is flagged.
+
+    When baseline spans (ref["baseline_spans"]) and candidate `spans` are both present,
+    we use the aligned word gaps. The detector compares the candidate's inter-word gap
+    energy to what the SAME gap in the baseline had — a filler raises it well above
+    the baseline's natural inter-word energy.
+
+    Without alignment this falls back to looking for voiced segments in detected
+    silences (less reliable — we only have the energy proxy, no word boundaries).
+    """
+    f, d = cfg["features"], cfg["detection"]
+    base_spans = ref.get("baseline_spans")
+    filler_min_s = d.get("filler_min_duration_s", 0.15)
+    filler_energy_ratio = d.get("filler_energy_ratio", 2.5)
+
+    if spans is not None and base_spans is not None and len(spans) > 1:
+        # Same-material path: compare inter-word gap energy between baseline and candidate.
+        times, rms = frame_rms(y, sr, f["frame_length_s"], f["hop_length_s"])
+        hop_s = f["hop_length_s"]
+        out = []
+        n = min(len(base_spans), len(spans))
+        for i in range(n - 1):
+            # Gap between word i's end and word i+1's start in the candidate.
+            gap_start = spans[i].end_s
+            gap_end = spans[i + 1].start_s
+            gap_dur = gap_end - gap_start
+            if gap_dur < filler_min_s:
+                continue  # too short to be a filler
+
+            # Measure RMS energy in the candidate's gap.
+            m = (times >= gap_start) & (times < gap_end)
+            if m.sum() < 2:
+                continue
+            gap_rms = float(rms[m].mean())
+
+            # Measure RMS energy in the baseline's equivalent gap.
+            base_gap_start = base_spans[i].end_s
+            base_gap_end = base_spans[i + 1].start_s if i + 1 < len(base_spans) else base_spans[-1].end_s
+            # Baseline gap energy: use the stored reference value from build_reference.
+            base_gap_rms = ref.get("mean_inter_word_rms", 0.0)
+
+            # A filler has much MORE energy than a natural inter-word gap.
+            if base_gap_rms > 0 and (gap_rms / base_gap_rms) >= filler_energy_ratio:
+                energy_ratio = gap_rms / base_gap_rms
+                margin = energy_ratio - filler_energy_ratio
+                scale = max(1.0, filler_energy_ratio)
+                conf = compute_confidence(margin, scale)
+                out.append(EvidenceItem(
+                    flaw_type="filler_word",
+                    interval_s=[round(gap_start, 3), round(gap_end, 3)],
+                    feature="inter_word_gap_rms",
+                    reference_value=round(base_gap_rms, 4),
+                    candidate_value=round(gap_rms, 4),
+                    rule=(f"gap between words {i}-{i+1} has RMS {gap_rms:.4f} vs "
+                          f"baseline mean inter-word RMS {base_gap_rms:.4f} "
+                          f"(>= {filler_energy_ratio:.1f}x)"),
+                    confidence=conf,
+                    uncertainty=("Voiced energy in an inter-word gap suggests a filler, "
+                                 "but could also be a breath or lip noise."),
+                    word_range=[i, i + 1]))
+        return out
+
+    # Fallback: no alignment — look for short voiced segments inside detected silences.
+    # This is weak (same limitation as Session 4 rate/monotone fallbacks).
+    return []  # No filler detection without alignment — honest fallback.
+
+
 DETECTORS = {"long_pause": detect_long_pause,
              "rate_deviation": detect_rate_deviation,
-             "monotone": detect_monotone}
+             "monotone": detect_monotone,
+             "filler_word": detect_filler_word}
 
 
 def detect_all(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
     """Run every detector blind on one candidate; return all evidence items.
 
-    `spans` (optional forced-alignment word spans) is used by the rate and monotone
-    detectors (Session 6b same-material rules). None keeps the Session 4 fallbacks.
+    `spans` (optional forced-alignment word spans) is used by the rate, monotone,
+    and filler_word detectors (Session 6b+ same-material rules). None keeps the
+    Session 4 fallbacks (filler_word returns empty without alignment).
     """
     items = []
     items.extend(detect_long_pause(y, sr, cfg, ref))
     items.extend(detect_rate_deviation(y, sr, cfg, ref, spans=spans))
     items.extend(detect_monotone(y, sr, cfg, ref, spans=spans))
+    items.extend(detect_filler_word(y, sr, cfg, ref, spans=spans))
     return items

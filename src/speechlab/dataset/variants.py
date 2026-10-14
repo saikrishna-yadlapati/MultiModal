@@ -139,6 +139,61 @@ def flatten_pitch(y: np.ndarray, sr: int, start_s: float, end_s: float,
     return new_y, gt, params
 
 
+def inject_filler(y: np.ndarray, sr: int, at_time_s: float, filler_s: float,
+                   filler_f0: float = 150.0, severity: float = 1.0):
+    """Insert a synthetic filler sound ('um'/'uh') at `at_time_s`.
+
+    A filler word is a short voiced nasal hum that speakers insert between words
+    when hesitating. We synthesize it as a low-frequency tone with amplitude
+    envelope (fade in/out) to resemble a natural 'um'. The severity controls the
+    filler's loudness relative to the surrounding speech: 1.0 = full volume,
+    0.25 = barely audible hum.
+
+    Takes:
+      y, sr        : audio and sample rate.
+      at_time_s    : insertion point in seconds.
+      filler_s     : duration of the filler in seconds.
+      filler_f0    : fundamental frequency of the filler (Hz); 150 Hz is a
+                     typical 'um' pitch for an average voice.
+      severity     : 0..1 controls amplitude; higher = more obvious filler.
+    Returns:
+      (new_y, (gt_start, gt_end), params). The ground-truth interval is the
+      exact location of the inserted filler in the output audio.
+    Flow: feeds make_dataset, which writes new_y + the GT interval to the manifest.
+    """
+    idx = min(max(int(round(at_time_s * sr)), 0), len(y))
+    n_filler = int(round(filler_s * sr))
+
+    # Synthesize a nasal 'um': fundamental + 2nd/3rd harmonics with a smooth envelope.
+    t = np.arange(n_filler) / sr
+    # The fundamental plus weak harmonics gives a buzzy, nasal quality.
+    tone = (0.6 * np.sin(2 * np.pi * filler_f0 * t)
+            + 0.25 * np.sin(2 * np.pi * 2 * filler_f0 * t)
+            + 0.15 * np.sin(2 * np.pi * 3 * filler_f0 * t))
+    # Smooth fade-in/fade-out envelope (raised cosine) so it doesn't click.
+    fade_len = min(n_filler // 4, int(0.05 * sr))  # 50ms or 25% of filler, whichever is less
+    envelope = np.ones(n_filler)
+    if fade_len > 0:
+        envelope[:fade_len] = 0.5 * (1 - np.cos(np.pi * np.arange(fade_len) / fade_len))
+        envelope[-fade_len:] = 0.5 * (1 - np.cos(np.pi * np.arange(fade_len, 0, -1) / fade_len))
+
+    # Scale amplitude to match the surrounding speech RMS, modulated by severity.
+    # Look at ~0.5s of context around the insertion point for level matching.
+    ctx_start = max(0, idx - int(0.25 * sr))
+    ctx_end = min(len(y), idx + int(0.25 * sr))
+    ctx = y[ctx_start:ctx_end]
+    ctx_rms = float(np.sqrt(np.mean(ctx ** 2))) if ctx.size > 0 else 0.1
+    tone_rms = float(np.sqrt(np.mean(tone ** 2))) if tone.size > 0 else 1.0
+    scale = (ctx_rms / tone_rms) * severity * 0.7  # 0.7 = fillers are typically softer
+    filler = (tone * envelope * scale).astype(y.dtype)
+
+    new_y = np.concatenate([y[:idx], filler, y[idx:]])
+    gt = (idx / sr, (idx + n_filler) / sr)
+    params = {"at_time_s": at_time_s, "filler_s": filler_s, "filler_f0": filler_f0,
+              "severity": severity, "method": "synth_nasal_filler"}
+    return new_y, gt, params
+
+
 if __name__ == "__main__":
     # Self-check (no model download, pure Praat): a 150 Hz sine with wobble.
     sr = 16000
@@ -155,4 +210,13 @@ if __name__ == "__main__":
     fy, fgt, fp = flatten_pitch(y, sr, 1.0, 2.0, 0.0, 65, 400)
     assert len(fy) == len(y), "flatten must preserve length"
     assert fgt == (1.0, 2.0)
+
+    # Filler injection: inserts voiced content, lengthens the clip.
+    fiy, figt, fip = inject_filler(y, sr, 1.5, 0.4)
+    assert len(fiy) > len(y), "filler must lengthen clip"
+    assert abs(figt[1] - figt[0] - 0.4) < 0.01, figt  # ~0.4s filler
+    # The filler region should contain non-zero audio (not silence).
+    filler_region = fiy[int(figt[0] * sr):int(figt[1] * sr)]
+    assert float(np.abs(filler_region).max()) > 0.001, "filler should be voiced, not silent"
     print("variants OK")
+
