@@ -165,6 +165,8 @@ def detect_rate_deviation(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
     hot = [(w["start_s"], w["end_s"], w["rate_hz"]) for w in win if w["rate_hz"] > thresh]
     out = []
     for s, e in _merge([(a, b) for a, b, _ in hot]):
+        if (e - s) < 0.5:
+            continue  # ignore brief sub-0.5s transient spikes
         peak = max(r for a, b, r in hot if a >= s - 1e-6 and b <= e + 1e-6)
         scale = max(0.5, base * d["rate_deviation_ratio"])
         conf = compute_confidence(peak - thresh, scale)
@@ -226,10 +228,12 @@ def detect_monotone(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
     # Fallback: no transcript/alignment — compare each window to the speaker's typical std.
     base = ref["typical_local_f0_std_hz"]
     thresh = base * d["monotone_f0_std_ratio"]
-    win = local_f0_std(times, f0, d["monotone_window_s"], d["monotone_hop_s"])
+    win = local_f0_std(times, f0, d["monotone_window_s"], d["monotone_hop_s"], min_voiced=15)
     cold = [(w["start_s"], w["end_s"], w["std_hz"]) for w in win if w["std_hz"] < thresh]
     out = []
     for s, e in _merge([(a, b) for a, b, _ in cold]):
+        if (e - s) < 0.75:
+            continue  # ignore isolated sub-0.75s unaccented dips
         low = min(v for a, b, v in cold if a >= s - 1e-6 and b <= e + 1e-6)
         margin = max(0.0, thresh - low)
         scale = max(1.0, thresh / 2.0)
@@ -295,21 +299,45 @@ def detect_filler_word(y, sr, cfg, ref, spans=None) -> list[EvidenceItem]:
             # Baseline gap energy: use the stored reference value from build_reference.
             base_gap_rms = ref.get("mean_inter_word_rms", 0.0)
 
-            # A filler has much MORE energy than a natural inter-word gap.
+            base_gap_dur = max(0.0, base_gap_end - base_gap_start)
+            excess_dur = gap_dur - base_gap_dur
+
+            # A filler has much MORE energy than a natural inter-word gap, OR
+            # an expanded hesitation gap with substantial non-silent energy (> 0.03 RMS).
+            fired = False
             if base_gap_rms > 0 and (gap_rms / base_gap_rms) >= filler_energy_ratio:
+                fired = True
                 energy_ratio = gap_rms / base_gap_rms
                 margin = energy_ratio - filler_energy_ratio
                 scale = max(1.0, filler_energy_ratio)
                 conf = compute_confidence(margin, scale)
+                rule_text = (f"gap between words {i}-{i+1} has RMS {gap_rms:.4f} vs "
+                             f"baseline mean inter-word RMS {base_gap_rms:.4f} "
+                             f"(>= {filler_energy_ratio:.1f}x)")
+                feat = "inter_word_gap_rms"
+                ref_val = round(base_gap_rms, 4)
+                cand_val = round(gap_rms, 4)
+            elif excess_dur >= filler_min_s and gap_rms >= 0.03:
+                # Contrastive same-material gap extension with voiced hesitation energy
+                fired = True
+                margin = excess_dur - filler_min_s
+                scale = max(0.2, filler_min_s)
+                conf = compute_confidence(margin, scale)
+                rule_text = (f"gap between words {i}-{i+1} is {gap_dur:.2f}s "
+                             f"(+{excess_dur:.2f}s over baseline {base_gap_dur:.2f}s) "
+                             f"with hesitation RMS {gap_rms:.4f}")
+                feat = "gap_duration_s"
+                ref_val = round(base_gap_dur, 3)
+                cand_val = round(gap_dur, 3)
+
+            if fired:
                 out.append(EvidenceItem(
                     flaw_type="filler_word",
                     interval_s=[round(gap_start, 3), round(gap_end, 3)],
-                    feature="inter_word_gap_rms",
-                    reference_value=round(base_gap_rms, 4),
-                    candidate_value=round(gap_rms, 4),
-                    rule=(f"gap between words {i}-{i+1} has RMS {gap_rms:.4f} vs "
-                          f"baseline mean inter-word RMS {base_gap_rms:.4f} "
-                          f"(>= {filler_energy_ratio:.1f}x)"),
+                    feature=feat,
+                    reference_value=ref_val,
+                    candidate_value=cand_val,
+                    rule=rule_text,
                     confidence=conf,
                     uncertainty=("Voiced energy in an inter-word gap suggests a filler, "
                                  "but could also be a breath or lip noise."),

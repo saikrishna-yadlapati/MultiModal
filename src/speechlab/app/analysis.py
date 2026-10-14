@@ -168,6 +168,12 @@ def analyze(cfg: dict, baseline_y, bsr, cand_y, csr,
         "aligned": aligned,
         "guard_fabricated": fabricated,
         "guard_schema": schema,
+        "cand_y": cand_y,
+        "cand_sr": csr,
+        "baseline_y": baseline_y,
+        "baseline_sr": bsr,
+        "cand_spans": cand_spans,
+        "baseline_spans": baseline_spans,
     }
 
 

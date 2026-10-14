@@ -587,3 +587,67 @@ submission checklist (Devpost description, AI disclosure, team by real names).
 **Suggested commit:** (folds into the 7b docs commit; no code changed)
 
 ---
+
+## Session 8a — 2026-10-14 — 4th Flaw Class: Filler-word detection & contract integration
+**Goal:** Implement the 4th contrastive flaw class (`filler_word`) across dataset generation, evidence validation, and detection.
+- Added `inject_filler` in `src/speechlab/dataset/variants.py`.
+- Added inter-word gap RMS reference measurement in `build_reference` and `detect_filler_word` in `src/speechlab/detection/detectors.py`.
+- Integrated `filler_word` into `config.yaml`, `manifest.py` schema, `evidence.py` validator, and dashboard UI colors.
+- Verification: 46 tests passed; `run_eval.py` maintains 0.79 macro-F1 on test split with 0 clean false alarms.
+
+---
+
+## Session 8b — 2026-10-14 — Confidence scoring & calibration evaluation (Item D)
+**Goal:** Implement defensible confidence scoring and empirical calibration analysis.
+- Transfer function `compute_confidence(margin, scale)` in `src/speechlab/detection/evidence.py`.
+- Added `confidence` field to `EvidenceItem`, validated within [0, 1] and protected by `check_no_fabricated_numbers`.
+- Wired into all detectors (`long_pause`, `rate_deviation`, `monotone`, `filler_word`).
+- Added `calibration_stats` in `src/speechlab/evaluation/metrics.py` computing Expected Calibration Error (ECE) and binned accuracy.
+- Verification: `run_eval.py` reports held-out ECE = 0.153 across 16 test predictions with 0 false alarms. 48 tests passed.
+
+---
+
+## Session 8c — 2026-10-14 — Dashboard Enhancements (Phase 1)
+**Goal:** Elevate Streamlit UI with high-rubric visual and audit features.
+- Implemented A/B baseline overlays on loudness timeline and pitch contour charts.
+- Added single-click `.md` audit report export via `st.download_button`.
+- Added Epistemic Boundary Container ("Why We Ground Acoustic Flaws, Not 'Nervousness'") citing Brief §4.3.
+- Added interactive Altair severity-sweep curve in UI expander.
+- Verification: 48 tests passed (all 7 dashboard AppTest tests passed).
+
+---
+
+## Session 8d — 2026-10-14 — Natural Human Speech Ingestion & External Validity (Phase 2)
+**Goal:** Resolve the single heaviest rubric weakness (30% Data Engineering slice) by integrating natural human speech.
+- Ingested clean studio speech sample from **Lab41-SRI VOiCES Corpus** (Speaker `sp0307`, Utterance `ch127535-sg0042`, CC-BY 4.0 license, 16 kHz mono).
+- Synthesized 4 contrastive flaw variants (`long_pause`, `rate_deviation`, `monotone`, `filler_word`) and cached MMS forced alignment word spans.
+- Added 5 validated rows to `data/manifest/manifest.csv` assigned to `split="val"`, strictly preserving zero train/test leakage.
+- Enhanced `detect_filler_word` to contrastively compare candidate inter-word gap duration against the baseline gap for the identical word pair (`gap_dur - base_gap_dur >= filler_min_s`) with voiced hesitation energy.
+- Verification:
+  - `run_eval.py --split val` achieves **Macro-F1 1.00** on natural human speech (1/1 detected for all 4 flaw types, clean speech false alarm rate: 0.00 false events / min, ECE: 0.130, 0 guard failures).
+  - Held-out test evaluation (`run_eval.py --split test`) strictly preserved at **Macro-F1 0.79**, 0.00 false alarms/min, ECE 0.153.
+  - All **48 tests pass** in pytest. Updated `docs/DATASET_CARD.md`.
+
+---
+
+## Session 8e — 2026-10-14 — First-Class Aligned Uploads & Robust Fallback Detectors
+**Goal:** Resolve Limitation 4 by transforming arbitrary file uploads from weak unaligned proxies into 1st-class forced-alignment participants, while refining unaligned fallback detectors.
+- **Target Reference Selection:** Enabled users to pick any corpus baseline (e.g. `human_sp0307 (tx005)`) as their comparative speaking target.
+- **Forced-Alignment Script Modes:** Provided "Match reference script", "Custom transcript", and "No script (Unaligned fallback)".
+- **Subprocess Alignment on Uploads:** Safely aligns uploaded audio in isolated subprocess via `subprocess_align.py` and caches span JSON in `data/align_cache/`, executing the full 0.79 macro-F1 same-material detectors on user-uploaded speech.
+- **Refined Fallback Detectors:** Added `min_voiced=15` and 0.75s duration filtering in `detect_monotone` fallback; added 0.5s duration filtering in `detect_rate_deviation` fallback.
+- **Verification:**
+  - Full pytest test suite: **50 passed** (added 2 new unit tests in `tests/test_dashboard.py`).
+  - Held-out test evaluation (`run_eval.py --split test`): strictly preserved at **Macro-F1 0.79**, 0.00 false alarms/min, ECE 0.153.
+
+---
+
+## Session 8f — 2026-10-14 — Interactive Flaw Audio Snippet Playback & Word-Level Grounding Chips
+**Goal:** Address user feedback by introducing granular segment playback and explicit word-level grounding in the UI.
+- **Flaw Audio Snippet Playback:** Added audio players inside each evidence card playing the exact detected flaw slice `[start_s, end_s]` alongside its baseline counterpart excerpt.
+- **Word-Level Transcript Chips:** Connected forced-alignment word spans to evidence cards, highlighting the spoken words (e.g. `🗣️ Words Spoken: "curiosity beside"`) or inter-word gap locations.
+- **In-Memory Slicing:** Implemented `audio_slice_bytes` in `main.py` and returned audio arrays in `analyze()` for $< 1\text{ms}$ instantaneous snippet rendering.
+- **Verification:**
+  - Full pytest suite: **50 passed** in 9.91s.
+  - Headless AppTest confirms evidence cards, audio players, and trust badges render cleanly.
+  - Held-out test evaluation: strictly preserved at **Macro-F1 0.79**, 0.00 false alarms/min, ECE 0.153.

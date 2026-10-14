@@ -164,3 +164,37 @@ def test_app_boots_and_shows_evidence():
 
     # "Evidence" subheader is always rendered.
     assert any("Evidence" in h.value for h in at.subheader)
+
+
+def test_upload_with_transcript_runs_same_material():
+    # When an upload provides a transcript matching the baseline, forced alignment
+    # enables the same-material 0.79 detectors.
+    from speechlab.app.main import _run
+    cfg = load_config()
+    rows = _manifest_rows()
+    b = next(r for r in rows if r.baseline_or_variant == "baseline")
+    v = next(r for r in rows if r.pair_id == b.pair_id and r.flaw_type == "long_pause")
+    v_bytes = (ROOT / v.audio_path).read_bytes()
+
+    res = _run(str(ROOT / b.audio_path), cand_path=str(ROOT / v.audio_path), cand_bytes=v_bytes,
+               base_id=b.sample_id, base_tx=b.transcript_text,
+               cand_id=v.sample_id, cand_tx=v.transcript_text)
+    assert res["aligned"] is True
+    assert res["guard_fabricated"] == []
+    assert res["guard_schema"] == []
+    assert len(res["evidence"]) >= 1
+
+
+def test_upload_without_transcript_runs_unaligned_fallback():
+    # When an upload has no transcript, fallback detectors run safely without crashing.
+    from speechlab.app.main import _run
+    rows = _manifest_rows()
+    b = next(r for r in rows if r.baseline_or_variant == "baseline")
+    v = next(r for r in rows if r.pair_id == b.pair_id and r.flaw_type == "long_pause")
+    v_bytes = (ROOT / v.audio_path).read_bytes()
+
+    res = _run(str(ROOT / b.audio_path), cand_path=None, cand_bytes=v_bytes,
+               base_id=None, base_tx=None, cand_id=None, cand_tx=None)
+    assert res["aligned"] is False
+    assert res["guard_fabricated"] == []
+    assert res["guard_schema"] == []

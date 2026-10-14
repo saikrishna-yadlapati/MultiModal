@@ -16,6 +16,7 @@ Usage: python scripts/run_eval.py
 """
 from __future__ import annotations
 
+import argparse
 import pathlib
 import sys
 from collections import defaultdict
@@ -34,7 +35,7 @@ from speechlab.detection.evidence import (  # noqa: E402
     check_no_fabricated_numbers, phrase_evidence, validate_evidence,
 )
 from speechlab.evaluation.metrics import (  # noqa: E402
-    calibration_stats, localization_stats, match_events, prf1,
+    Event, calibration_stats, localization_stats, match_events, prf1,
 )
 
 FLAWS = ("long_pause", "rate_deviation", "monotone", "filler_word")
@@ -48,18 +49,27 @@ def load_wav_mono(path: pathlib.Path):
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Held-out evaluation harness")
+    parser.add_argument("--split", choices=["test", "val", "all"], default="test",
+                        help="Dataset split to evaluate (default: test)")
+    args = parser.parse_args()
+
     cfg = load_config()
     iou_thr = cfg["evaluation"]["iou_match_threshold"]
     manifest = read_manifest(ROOT / cfg["paths"]["manifest"])
-    test = [r for r in manifest if r.split == "test"]
-    if not test:
-        print("no test rows — run scripts/make_dataset.py first")
+    if args.split == "all":
+        eval_rows = manifest
+    else:
+        eval_rows = [r for r in manifest if r.split == args.split]
+
+    if not eval_rows:
+        print(f"no rows found for split '{args.split}'")
         return 1
 
     # One reference per pair, measured on that pair's own baseline (speaker-matched).
     # Forced-align every clip once (cached) so local rate is real words-per-second.
     cache_dir = ROOT / "data" / "align_cache"
-    baselines = {r.pair_id: r for r in test if r.baseline_or_variant == "baseline"}
+    baselines = {r.pair_id: r for r in eval_rows if r.baseline_or_variant == "baseline"}
     refs: dict[str, dict] = {}
     for pid, b in baselines.items():
         by, bsr = load_wav_mono(ROOT / b.audio_path)
@@ -74,7 +84,7 @@ def main() -> int:
     guard_fail = 0
     scored_preds: list[tuple[float, bool]] = []
 
-    for v in sorted(test, key=lambda r: (r.pair_id, r.flaw_type, r.severity or 0)):
+    for v in sorted(eval_rows, key=lambda r: (r.pair_id, r.flaw_type, r.severity or 0)):
         y, sr = load_wav_mono(ROOT / v.audio_path)
         ref = refs.get(v.pair_id)
         if ref is None:
@@ -86,14 +96,16 @@ def main() -> int:
         for e in items:
             if validate_evidence(e) or check_no_fabricated_numbers(phrase_evidence(e), e):
                 guard_fail += 1
-        preds = [(e.flaw_type, (e.interval_s[0], e.interval_s[1])) for e in items]
+        preds: list[Event] = [(e.flaw_type, (float(e.interval_s[0]), float(e.interval_s[1]))) for e in items]
 
         if v.baseline_or_variant == "baseline":  # clean speech -> any event is a false alarm
             clean_events += len(preds)
             clean_seconds += len(y) / sr
             res = match_events(preds, [], iou_thr)
         else:
-            gt = [(v.flaw_type, (v.gt_start_s, v.gt_end_s))]
+            start_s = float(v.gt_start_s) if v.gt_start_s is not None else 0.0
+            end_s = float(v.gt_end_s) if v.gt_end_s is not None else 0.0
+            gt: list[Event] = [(v.flaw_type, (start_s, end_s))]
             res = match_events(preds, gt, iou_thr)
             det = 1 if res.tp else 0
             s = sweep[(v.flaw_type, v.severity)]
@@ -113,10 +125,10 @@ def main() -> int:
             matched[cls].extend(t for t in res.tp if t[0][0] == cls)
 
     # ---------- report ----------
-    print("=== HELD-OUT EVALUATION (test split: unseen speaker + unseen transcripts) ===")
+    print(f"=== EVALUATION (split: {args.split}) ===")
     print(f"thresholds from config.yaml (NOT tuned on this set); IoU match >= {iou_thr}\n")
 
-    report_flaws = [cls for cls in FLAWS if any(r.flaw_type == cls for r in test) or tp[cls] > 0 or fp[cls] > 0]
+    report_flaws = [cls for cls in FLAWS if any(r.flaw_type == cls for r in eval_rows) or tp[cls] > 0 or fp[cls] > 0]
     if not report_flaws:
         report_flaws = list(FLAWS)
 
